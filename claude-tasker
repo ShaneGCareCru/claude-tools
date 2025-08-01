@@ -1,0 +1,1161 @@
+#!/bin/bash
+
+# Enhanced Claude Task Runner with Agents Integration
+# Combines sophisticated Lyra-Dev meta-prompts with Claude Code subagents
+# Features:
+#   - Story point estimation and task decomposition via GitHub MCP
+#   - Specialized agents for different workflow types
+#   - Preserved Lyra-Dev meta-prompt system (now agent-targeted)
+#   - Enhanced git safety patterns with agent coordination
+#   - Two-stage execution for complex tasks, single-stage for simple ones
+#   - Intelligent agent delegation and orchestration
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+PURPLE='\033[0;35m'
+NC='\033[0m'
+
+# Logging functions
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_range() { echo -e "${CYAN}[RANGE]${NC} $1"; }
+log_agent() { echo -e "${PURPLE}[AGENT]${NC} $1"; }
+
+# Check if required tools are available
+check_dependencies() {
+    local prompt_only="$1"
+    local missing_tools=()
+
+    if ! command -v gh &> /dev/null; then
+        missing_tools+=("gh (GitHub CLI)")
+    fi
+
+    if ! command -v jq &> /dev/null; then
+        missing_tools+=("jq (JSON processor)")
+    fi
+
+    if [ "$prompt_only" != "true" ] && ! command -v claude &> /dev/null; then
+        missing_tools+=("claude (Claude Code)")
+    fi
+
+    if ! command -v git &> /dev/null; then
+        missing_tools+=("git")
+    fi
+
+    if [ ${#missing_tools[@]} -ne 0 ]; then
+        log_error "Missing required tools:"
+        printf '%s\n' "${missing_tools[@]}"
+        exit 1
+    fi
+}
+
+# Validate environment and agents
+validate_environment() {
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        log_error "This script must be run from within a git repository."
+        exit 1
+    fi
+
+    if [ ! -f "CLAUDE.md" ]; then
+        log_error "CLAUDE.md not found in current directory."
+        exit 1
+    fi
+
+    # Check if agents are available
+    if [ ! -d ".claude/agents" ]; then
+        log_warning "No .claude/agents directory found. Creating agents..."
+        setup_agents_if_missing
+    fi
+
+    local agent_count=$(ls .claude/agents/*.md 2>/dev/null | wc -l)
+    if [ "$agent_count" -eq 0 ]; then
+        log_warning "No agents found. Creating default agent set..."
+        setup_agents_if_missing
+    else
+        log_success "Found $agent_count agents in .claude/agents/"
+    fi
+
+    log_success "Environment validation passed"
+}
+
+# Setup agents if missing
+setup_agents_if_missing() {
+    log_info "Setting up Claude Code agents..."
+    
+    # Create minimal agent set for core functionality
+    mkdir -p .claude/agents
+    
+    # GitHub Issue Implementer (essential)
+    cat > .claude/agents/github-issue-implementer.md << 'EOF'
+---
+name: github-issue-implementer
+description: Use PROACTIVELY for GitHub issue implementation. Handles audit, gap analysis, surgical code changes, testing, and PR management following 4-D methodology.
+tools: Read, Write, Edit, Bash, Grep, Glob, Search
+---
+
+You are a senior software engineer specializing in GitHub issue implementation using the 4-D methodology (DECONSTRUCT → DIAGNOSE → DEVELOP → DELIVER).
+
+**Core Process:**
+1. **DECONSTRUCT**: Analyze issue requirements vs current codebase
+2. **DIAGNOSE**: Verify claimed vs actual implementation status  
+3. **DEVELOP**: Plan surgical changes following CLAUDE.md guidelines
+4. **DELIVER**: Implement missing pieces with tests and documentation
+
+**Critical Rules:**
+- Always audit claimed status vs reality before coding
+- Only implement what's genuinely missing (surgical approach)
+- Follow ALL CLAUDE.md guidelines religiously
+- Post audit results as GitHub issue comment
+- Create detailed PR with gap analysis
+
+Focus on being surgical and precise, not reimplementing working functionality.
+EOF
+
+    # Story Point Estimator (for task decomposition)
+    cat > .claude/agents/story-point-estimator.md << 'EOF'
+---
+name: story-point-estimator
+description: Use PROACTIVELY for story point estimation and GitHub issue decomposition. Creates subtask issues via GitHub MCP when >8 points.
+tools: Read, Bash, Search
+---
+
+You are a senior engineering manager specializing in agile estimation and task breakdown.
+
+**Story Point Scale:**
+- 1-2 points: Simple (single file, <4 hours)
+- 3-5 points: Moderate (multiple files, 1-2 days)  
+- 8 points: Complex but manageable (3-5 days)
+- 13+ points: MUST decompose into 3-5 point subtasks
+
+**When >8 points, create subtasks using:**
+```bash
+gh issue create --title "Subtask: [specific task]" \
+                --body "[detailed acceptance criteria]" \
+                --label "subtask,epic:${parent_issue},points:${points}" \
+                --milestone "current-sprint"
+```
+
+Focus on accurate estimation and effective decomposition for better predictability.
+EOF
+
+    log_success "Essential agents created. Full agent setup available via separate script."
+}
+
+# Extract repository information
+get_repo_info() {
+    local git_url
+    git_url=$(git config --get remote.origin.url 2>/dev/null || {
+        log_error "Could not find remote.origin.url in git config"
+        exit 1
+    })
+
+    if [[ $git_url =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
+        REPO_OWNER="${BASH_REMATCH[1]}"
+        REPO_NAME="${BASH_REMATCH[2]}"
+        REPO_NAME="${REPO_NAME%.git}"
+    else
+        log_error "Could not parse GitHub repository from git URL: $git_url"
+        exit 1
+    fi
+
+    log_info "Repository: ${REPO_OWNER}/${REPO_NAME}"
+}
+
+# Workspace hygiene - enhanced with agent coordination
+workspace_hygiene() {
+    log_info "Cleaning workspace for agent coordination..."
+    git reset --hard || true
+    git clean -fd || true
+    
+    local main_branch
+    if git show-ref --verify --quiet refs/heads/main; then
+        main_branch="main"
+    elif git show-ref --verify --quiet refs/heads/master; then
+        main_branch="master"
+    else
+        log_warning "Could not find main or master branch"
+        return 0
+    fi
+    
+    git checkout "$main_branch" || true
+    git pull origin "$main_branch" || true
+    
+    # Clean up any previous agent context files
+    rm -f /tmp/agent-context-*.md /tmp/claude-*.txt /tmp/*.json 2>/dev/null || true
+    
+    log_success "Workspace cleaned and ready for agent coordination"
+}
+
+# Story point assessment with task decomposition
+assess_and_potentially_decompose() {
+    local issue_number="$1"
+    local issue_details="$2"
+    
+    log_agent "Assessing story points and potential decomposition for issue #${issue_number}..."
+    
+    # Create assessment prompt for story-point-estimator agent
+    local assessment_prompt="Use the story-point-estimator agent to analyze GitHub issue #${issue_number}:
+
+**Task**: Estimate story points and decompose if necessary
+
+**Process**:
+1. **Analyze Complexity**: Review issue requirements, acceptance criteria, technical scope
+2. **Estimate Points**: Use Fibonacci scale (1,2,3,5,8,13,21) based on:
+   - Implementation complexity
+   - Number of systems/files affected
+   - Unknown factors requiring research
+   - Testing and documentation scope
+3. **Decompose if >8 Points**: Create subtask issues via GitHub MCP with:
+   - Clear acceptance criteria per subtask
+   - Proper labels (subtask, epic:${issue_number}, points:X)
+   - Dependencies between subtasks
+   - Target 3-5 points per subtask
+4. **Output Decision**: READY_TO_IMPLEMENT or DECOMPOSED_INTO_SUBTASKS
+
+**Issue Details**:
+${issue_details}
+
+**Repository**: ${REPO_OWNER}/${REPO_NAME}
+**Issue URL**: https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/${issue_number}"
+
+    local assessment_file="/tmp/story-assessment-${issue_number}.md"
+    
+    if [ "$INTERACTIVE" = true ]; then
+        echo "$assessment_prompt" | claude --dangerously-skip-permissions | tee "$assessment_file"
+    else
+        echo "$assessment_prompt" | claude -p --dangerously-skip-permissions | tee "$assessment_file"
+    fi
+    
+    # Check if subtasks were created
+    sleep 2  # Give GitHub API time to update
+    local subtask_issues=$(gh issue list --repo "${REPO_OWNER}/${REPO_NAME}" \
+                          --search "label:subtask label:epic:${issue_number}" \
+                          --json number,title --jq '.[].number' 2>/dev/null || echo "")
+    
+    if [ -n "$subtask_issues" ] && [ "$subtask_issues" != "" ]; then
+        log_success "Issue decomposed into subtasks: $(echo $subtask_issues | tr '\n' ' ')"
+        echo "DECOMPOSED:$subtask_issues"
+    else
+        log_info "Issue assessed as manageable size for direct implementation"
+        echo "READY_TO_IMPLEMENT"
+    fi
+}
+
+# Enhanced Lyra-Dev prompt generation - now agent-targeted
+generate_agent_targeted_lyra_prompt() {
+    local target_agent="$1"
+    local issue_number="$2"
+    local issue_details="$3"
+    local claude_context="$4"
+    local additional_context="$5"
+    
+    log_info "Generating agent-targeted Lyra-Dev prompt for: $target_agent"
+    
+    cat << EOF
+# Lyra-Dev: Agent-Targeted Prompt Optimizer
+
+You are **Lyra-Dev**, an elite AI prompt optimizer creating a **fully-formed, self-reliant prompt** specifically for the **${target_agent} agent**.
+
+Since you know the target agent's specialization, you can:
+- **Dial down generic context** (agent already has domain expertise)
+- **Focus on issue-specific requirements** 
+- **Pre-strategize the solution path** using CLAUDE.md constraints
+- **Ensure structured 4-D methodology output**
+
+## Target Agent: ${target_agent}
+
+This agent specializes in: $(get_agent_specialization "$target_agent")
+
+## 🔄 THE 4-D METHODOLOGY (Agent-Targeted Edition)
+
+### 1. DECONSTRUCT (Agent-Aware)
+- Extract task intent specific to ${target_agent}'s domain
+- Map issue requirements to agent's area of expertise  
+- Identify deliverables the agent is designed to produce
+
+### 2. DIAGNOSE (Pre-Strategized)
+- **CRITICAL**: Agent must verify claimed completion status
+- Check for domain-specific constraints from CLAUDE.md
+- Pre-load codebase patterns the agent should follow
+- Account for integration with other systems
+
+### 3. DEVELOP (Agent-Optimized)
+- Select approach optimized for ${target_agent}'s capabilities
+- Embed CLAUDE.md guidelines relevant to this agent's work
+- Plan output that fits agent's standard deliverable patterns
+
+### 4. DELIVER (Structured Output)
+- Agent MUST use exact 4-D headers in response
+- Follow agent's specialized workflow patterns
+- Include agent-appropriate GitHub integration commands
+
+## 📋 PROJECT CONTEXT
+
+**Repository:** ${REPO_OWNER}/${REPO_NAME}
+**Target Agent:** ${target_agent}
+**Issue:** #${issue_number}
+
+### Project Guidelines (CLAUDE.md)
+\`\`\`
+${claude_context}
+\`\`\`
+
+${additional_context}
+
+## 🛠️ AGENT-SPECIFIC OPTIMIZATION
+
+**Task for Lyra-Dev**: Generate a prompt that tells the ${target_agent} agent to:
+
+1. **Use 4-D Methodology**: DECONSTRUCT → DIAGNOSE → DEVELOP → DELIVER
+2. **Follow Agent Specialization**: Leverage the agent's domain expertise
+3. **Apply CLAUDE.md Rules**: Follow ALL project-specific guidelines
+4. **Produce Agent-Appropriate Output**: Match the agent's standard deliverable format
+5. **Integrate with GitHub**: Use appropriate gh commands for the agent's role
+
+## 📝 ISSUE CONTEXT
+
+**GitHub Issue #${issue_number}:**
+${issue_details}
+
+---
+
+**Generate the optimized prompt that will be sent to the ${target_agent} agent.**
+
+The prompt should be **concise but complete** (under 3000 chars when possible), **actionable**, and **structured** to ensure the agent follows the 4-D methodology while producing high-quality, project-compliant deliverables.
+EOF
+}
+
+# Get agent specialization description
+get_agent_specialization() {
+    local agent_name="$1"
+    
+    case "$agent_name" in
+        "github-issue-implementer")
+            echo "GitHub issue audit, gap analysis, surgical code implementation, testing, and PR creation"
+            ;;
+        "github-pr-reviewer")
+            echo "Comprehensive PR technical review, CLAUDE.md compliance checking, security analysis"
+            ;;
+        "github-bug-hunter")
+            echo "Bug investigation, root cause analysis, GitHub issue creation with detailed reports"
+            ;;
+        "story-point-estimator")
+            echo "Story point estimation, task complexity analysis, GitHub issue decomposition"
+            ;;
+        "project-orchestrator")
+            echo "Multi-agent coordination, complex feature delivery, cross-functional project management"
+            ;;
+        *)
+            echo "Specialized development workflow automation"
+            ;;
+    esac
+}
+
+# Determine appropriate agent for task
+determine_target_agent() {
+    local mode="$1"
+    local issue_details="$2"
+    local pr_details="$3"
+    
+    case "$mode" in
+        "implement")
+            # Check if this is a complex issue that needs orchestration
+            if echo "$issue_details" | grep -q -i "epic\|large\|complex\|multiple.*system\|full.*stack"; then
+                echo "project-orchestrator"
+            else
+                echo "github-issue-implementer"
+            fi
+            ;;
+        "review")
+            echo "github-pr-reviewer"
+            ;;
+        "bug")
+            echo "github-bug-hunter"
+            ;;
+        *)
+            echo "github-issue-implementer"
+            ;;
+    esac
+}
+
+# Enhanced two-stage execution with agent targeting
+execute_two_stage_with_agent() {
+    local target_agent="$1"
+    local issue_number="$2"
+    local issue_details="$3"
+    local claude_context="$4"
+    local additional_context="$5"
+    
+    log_info "🎭 Two-stage execution targeting: $target_agent"
+    
+    # Stage 1: Agent-targeted Lyra-Dev prompt generation
+    log_info "Stage 1: Generating agent-targeted Lyra-Dev prompt..."
+    
+    local meta_prompt
+    meta_prompt=$(generate_agent_targeted_lyra_prompt "$target_agent" "$issue_number" "$issue_details" "$claude_context" "$additional_context")
+    
+    local builder_json="/tmp/agent-builder-${issue_number}.json"
+    local builder_txt="/tmp/agent-prompt-${issue_number}.txt"
+    
+    if ! build_prompt_with_llm "$meta_prompt" "$builder_json" "$builder_txt"; then
+        log_error "Agent-targeted prompt builder failed for $target_agent"
+        return 1
+    fi
+    
+    log_success "Agent-targeted prompt generated ($(wc -c < "$builder_txt") bytes)"
+    
+    # Stage 2: Execute optimized prompt with target agent
+    log_info "Stage 2: Executing optimized prompt with $target_agent agent..."
+    
+    local output_file="/tmp/agent-output-${issue_number}.md"
+    local optimized_prompt
+    optimized_prompt=$(cat "$builder_txt")
+    
+    # Add explicit agent invocation to ensure proper delegation
+    local agent_prompt="Use the ${target_agent} agent for this task:
+
+${optimized_prompt}"
+    
+    if [ "$INTERACTIVE" = true ]; then
+        echo "$agent_prompt" | claude --dangerously-skip-permissions | tee "$output_file"
+    else
+        echo "$agent_prompt" | claude -p --dangerously-skip-permissions | tee "$output_file"
+    fi
+    
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        log_error "Agent execution failed: $target_agent"
+        return 1
+    fi
+    
+    # Verify agent was actually used (check for agent-specific patterns in output)
+    if ! grep -q "DECONSTRUCT\|DIAGNOSE\|DEVELOP\|DELIVER" "$output_file"; then
+        log_warning "Agent may not have followed 4-D methodology - check output"
+    fi
+    
+    # Clean up intermediate files
+    rm -f "$builder_json" "$builder_txt"
+    
+    echo "$output_file"
+    return 0
+}
+
+# Single-stage execution (for simple tasks or direct agent invocation)
+execute_single_stage_with_agent() {
+    local target_agent="$1"
+    local simple_prompt="$2"
+    local issue_number="$3"
+    
+    log_info "🔧 Single-stage execution with: $target_agent"
+    
+    local output_file="/tmp/agent-simple-${issue_number}.md"
+    local agent_prompt="Use the ${target_agent} agent to:
+
+${simple_prompt}
+
+Follow the 4-D methodology (DECONSTRUCT → DIAGNOSE → DEVELOP → DELIVER) and ensure all CLAUDE.md guidelines are followed."
+    
+    if [ "$INTERACTIVE" = true ]; then
+        echo "$agent_prompt" | claude --dangerously-skip-permissions | tee "$output_file"
+    else
+        echo "$agent_prompt" | claude -p --dangerously-skip-permissions | tee "$output_file"
+    fi
+    
+    echo "$output_file"
+}
+
+# Build prompt using LLM (preserved from original)
+build_prompt_with_llm() {
+    local meta_prompt="$1"
+    local json_out="$2"
+    local text_out="$3"
+
+    log_info "Building agent-targeted prompt with LLM (input: ${#meta_prompt} chars)..."
+    
+    local prompt_file="/tmp/llm-prompt-${RANDOM}.txt"
+    printf '%s\n' "$meta_prompt" > "$prompt_file"
+    
+    if ! command -v llm &> /dev/null; then
+        log_error "LLM command not found - falling back to Claude"
+        return build_prompt_with_claude "$meta_prompt" "$json_out" "$text_out"
+    fi
+    
+    cat "$prompt_file" | llm 2>/dev/null | tee "$text_out" >/dev/null
+    
+    # Create fake JSON for compatibility
+    cat > "$json_out" << EOF
+{
+  "type": "result",
+  "subtype": "success", 
+  "is_error": false,
+  "result": "$(cat "$text_out" | sed 's/"/\\"/g' | tr '\n' ' ')"
+}
+EOF
+    
+    rm -f "$prompt_file"
+    
+    local text_size=$(wc -c < "$text_out" 2>/dev/null || echo "0")
+    if [ "$text_size" -eq 0 ]; then
+        log_error "LLM returned empty response"
+        return 1
+    fi
+    
+    log_info "Agent-targeted prompt generated successfully"
+    return 0
+}
+
+# Fallback: Build prompt with Claude (preserved from original)
+build_prompt_with_claude() {
+    local meta_prompt="$1"
+    local json_out="$2"
+    local text_out="$3"
+
+    log_info "Building prompt with Claude (fallback)..."
+    
+    if [ ${#meta_prompt} -gt 400000 ]; then
+        log_error "Prompt extremely large, likely exceeds token limits"
+        return 1
+    fi
+    
+    local temp_input="/tmp/claude-input-${RANDOM}.txt"
+    printf '%s\n' "$meta_prompt" > "$temp_input"
+    
+    claude -p --model sonnet --dangerously-skip-permissions --output-format json < "$temp_input" 2>/dev/null \
+        | jq '.' >"$json_out" 2>/dev/null
+    
+    jq -r 'if (.result? // "") != "" then .result else empty end' "$json_out" >"$text_out"
+    
+    rm -f "$temp_input"
+    
+    if [[ ! -s $text_out ]]; then
+        log_error "Claude builder produced no usable prompt"
+        return 1 
+    fi
+    
+    return 0
+}
+
+# Create timestamped branch (preserved from original)
+create_branch() {
+    local number="$1"
+    local type="$2"
+    local branch_name
+
+    if [ "$type" = "issue" ]; then
+        branch_name="issue-${number}-$(date +%s)"
+    else
+        branch_name="review-pr-${number}-$(date +%s)"
+    fi
+
+    if git checkout -B "$branch_name" main >/dev/null 2>&1; then
+        echo "$branch_name"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Commit and push changes (preserved from original)
+commit_and_push() {
+    local branch_name="$1"
+    local number="$2"
+    local mode="$3"
+    
+    log_info "Committing and pushing changes for ${mode} #${number}..."
+    
+    if git diff --cached --quiet && git diff --quiet; then
+        log_warning "No changes to commit"
+        return 0
+    fi
+    
+    git add -A
+    
+    if git diff --cached --quiet; then
+        log_warning "No staged changes found"
+        return 0
+    fi
+    
+    local commit_msg="🤖 ${branch_name}: automated ${mode} via agent coordination"
+    if git commit -m "$commit_msg"; then
+        log_success "Changes committed successfully"
+        
+        if git push -u origin "$branch_name"; then
+            log_success "Branch pushed to origin: ${branch_name}"
+        else
+            log_error "Failed to push branch: ${branch_name}"
+            return 1
+        fi
+    else
+        log_error "Failed to commit changes"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Create or update PR (preserved from original but enhanced with agent context)
+ensure_pr() {
+    local number="$1"
+    local branch="$2"
+    local mode="$3"
+    local body_file="$4"
+    
+    log_info "Creating/updating PR for ${mode} #${number}..."
+    
+    if gh pr view "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" &>/dev/null; then
+        log_info "Updating existing PR for branch ${branch}..."
+        gh pr edit "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$body_file"
+        local pr_number=$(gh pr view "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --json number -q '.number')
+        echo "$pr_number"
+    else
+        local title
+        if [ "$mode" = "implement" ]; then
+            title="🤖 Issue #$number – agent-coordinated implementation"
+        else
+            title="🤖 PR #$number – agent-coordinated review"
+        fi
+        
+        local main_branch="main"
+        if ! git show-ref --verify --quiet refs/heads/main; then
+            main_branch="master"
+        fi
+        
+        if gh pr create --repo "${REPO_OWNER}/${REPO_NAME}" --base "$main_branch" --head "$branch" \
+                        --title "$title" --body-file "$body_file" >/dev/null; then
+            local new_pr_number=$(gh pr view "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --json number -q '.number')
+            log_success "PR created: #${new_pr_number}"
+            echo "$new_pr_number"
+        else
+            log_error "Failed to create PR for branch: ${branch}"
+            return 1
+        fi
+    fi
+}
+
+# Issue comment (preserved from original)
+issue_comment() {
+    local number="$1"
+    local body_file="$2"
+    local mode="$3"
+    
+    log_info "Adding agent coordination comment to ${mode} #${number}..."
+    
+    if [ ! -f "$body_file" ]; then
+        log_error "Body file $body_file does not exist"
+        return 1
+    fi
+    
+    local comment_file="/tmp/agent-comment-${number}.md"
+    {
+        echo "🤖 **Agent-Coordinated ${mode^} Complete**"
+        echo ""
+        echo "**Agent Used**: $(grep -o "Use the [a-z-]* agent" "$body_file" | head -1 | sed 's/Use the \(.*\) agent/\1/' || echo "Multiple agents")"
+        echo "**Branch**: \`$(git branch --show-current)\`"
+        echo "**Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo ""
+        echo "## Agent Analysis"
+        echo ""
+        cat "$body_file"
+    } > "$comment_file"
+    
+    if [ "$mode" = "implement" ]; then
+        if gh issue comment "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$comment_file"; then
+            log_success "Agent comment added to issue #${number}"
+        else
+            log_warning "Failed to add comment to issue #${number}"
+        fi
+    else
+        if gh pr comment "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$comment_file"; then
+            log_success "Agent comment added to PR #${number}"
+        else
+            log_warning "Failed to add comment to PR #${number}"
+        fi
+    fi
+    
+    rm -f "$comment_file"
+}
+
+# Main task processing with agent coordination
+process_single_task() {
+    local number="$1"
+    local mode="$2"
+    local project_info="$3"  
+    local claude_context="$4"
+    local is_range_mode="$5"
+    local auto_pr_review="$6"
+    
+    local task_type
+    if [ "$mode" = "implement" ]; then
+        task_type="issue"
+        log_range "🔨 Processing issue #${number} with agent coordination..."
+    else
+        task_type="pr"
+        log_range "🔍 Processing PR #${number} with agent coordination..."
+    fi
+
+    # Early exit for prompt-only mode
+    if [ "$PROMPT_ONLY" = true ]; then
+        log_info "Prompt-only mode: generating agent-targeted prompts..."
+        
+        local details
+        if [ "$mode" = "implement" ]; then
+            details=$(gh issue view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body,labels --jq '.title + "\n\n" + .body' 2>/dev/null || echo "Issue details unavailable")
+        else
+            details=$(gh pr view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body --jq '.title + "\n\n" + .body' 2>/dev/null || echo "PR details unavailable")
+        fi
+        
+        local target_agent=$(determine_target_agent "$mode" "$details" "$details")
+        
+        echo "==================== AGENT-TARGETED LYRA-DEV PROMPT ===================="
+        generate_agent_targeted_lyra_prompt "$target_agent" "$number" "$details" "$claude_context" ""
+        echo ""
+        echo "Target Agent: $target_agent"
+        echo "====================== PROMPT PREVIEW END ========================"
+        return 0
+    fi
+
+    # Full automation mode
+    workspace_hygiene
+
+    # Fetch task details
+    local details
+    if [ "$mode" = "implement" ]; then
+        details=$(gh issue view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body,labels,assignees,milestone,url,comments 2>/dev/null || {
+            log_error "Could not fetch issue #${number}"
+            return 1
+        })
+    else
+        details=$(gh pr view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body,headRefName,baseRefName,author,additions,deletions,changedFiles,commits,reviewDecision,mergeable,url 2>/dev/null || {
+            log_error "Could not fetch PR #${number}"
+            return 1
+        })
+    fi
+
+    # Story point assessment and potential decomposition (only for issues)
+    if [ "$mode" = "implement" ]; then
+        local assessment_result
+        assessment_result=$(assess_and_potentially_decompose "$number" "$details")
+        
+        if [[ "$assessment_result" == "DECOMPOSED:"* ]]; then
+            local subtasks=$(echo "$assessment_result" | cut -d: -f2)
+            log_success "Issue decomposed into subtasks: $subtasks"
+            
+            # Process each subtask
+            echo "$subtasks" | tr ' ' '\n' | while read -r subtask_num; do
+                if [ -n "$subtask_num" ]; then
+                    log_info "Processing subtask issue #${subtask_num}..."
+                    process_single_task "$subtask_num" "$mode" "$project_info" "$claude_context" false "$auto_pr_review"
+                    sleep 30  # Rate limiting
+                fi
+            done
+            
+            return 0
+        fi
+        
+        log_info "Issue ready for direct implementation"
+    fi
+
+    # Determine target agent
+    local target_agent=$(determine_target_agent "$mode" "$details" "$details")
+    log_agent "Selected agent: $target_agent"
+
+    # Create branch for implementation
+    local branch_name=""
+    if [ "$mode" = "implement" ]; then
+        if ! branch_name=$(create_branch "$number" "$task_type"); then
+            log_error "Failed to create branch for ${task_type} #${number}"
+            return 1
+        fi
+        log_success "Created branch: ${branch_name}"
+    fi
+
+    # Execute with appropriate strategy
+    local output_file
+    local issue_complexity=$(echo "$details" | jq -r '.body' | wc -w)
+    
+    if [ "$issue_complexity" -gt 200 ] || echo "$details" | grep -q -i "complex\|architecture\|multiple.*system"; then
+        log_info "Complex task detected - using two-stage execution"
+        output_file=$(execute_two_stage_with_agent "$target_agent" "$number" "$details" "$claude_context" "$project_info")
+    else
+        log_info "Simple task detected - using single-stage execution"
+        local simple_prompt
+        if [ "$mode" = "implement" ]; then
+            simple_prompt="Implement GitHub issue #${number} following CLAUDE.md guidelines. Focus on surgical changes and comprehensive testing."
+        else
+            simple_prompt="Review GitHub PR #${number} for code quality, security, and CLAUDE.md compliance. Provide actionable feedback."
+        fi
+        output_file=$(execute_single_stage_with_agent "$target_agent" "$simple_prompt" "$number")
+    fi
+    
+    if [ $? -ne 0 ] || [ ! -f "$output_file" ]; then
+        log_error "Agent execution failed for ${task_type} #${number}"
+        return 1
+    fi
+
+    log_success "Agent execution completed for ${task_type} #${number}"
+
+    # Handle post-processing based on mode
+    if [ "$mode" = "implement" ]; then
+        # Post audit comment on issue
+        issue_comment "$number" "$output_file" "$mode"
+        
+        # Check for changes and create PR
+        if git diff --quiet; then
+            log_success "No code changes needed - task appears complete"
+            return 0
+        fi
+
+        log_info "Code changes detected, proceeding with commit and PR creation..."
+
+        if ! commit_and_push "$branch_name" "$number" "$mode"; then
+            log_error "Failed to commit/push changes for ${task_type} #${number}"
+            return 1
+        fi
+
+        if ! git diff --quiet main...HEAD; then
+            local created_pr_number
+            created_pr_number=$(ensure_pr "$number" "$branch_name" "$mode" "$output_file")
+            
+            if [ $? -ne 0 ]; then
+                log_error "Failed to create/update PR for ${task_type} #${number}"
+                return 1
+            fi
+            
+            # Auto-review if requested
+            if [ "$auto_pr_review" = true ] && [ -n "$created_pr_number" ]; then
+                log_info "🤖 Auto-reviewing created PR #${created_pr_number}..."
+                sleep 5  # Give GitHub time to process PR creation
+                process_single_task "$created_pr_number" "review" "$project_info" "$claude_context" false false
+            fi
+        fi
+    else
+        # PR review mode - Claude agent should have posted comment directly
+        log_success "PR review completed via agent delegation"
+    fi
+
+    log_success "Completed agent-coordinated workflow for ${task_type} #${number}"
+    return 0
+}
+
+# Parse command line arguments (preserved from original)
+parse_arguments() {
+    MODE=""
+    ISSUE_RANGE=""
+    PR_RANGE=""
+    BUG_DESCRIPTION=""
+    PROJECT_ID=""
+    PROMPT_ONLY=false
+    INTERACTIVE=false
+    AUTO_PR_REVIEW=false
+    TIMEOUT_SECONDS=30
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --review-pr)
+                if [ -n "$MODE" ]; then
+                    log_error "Cannot specify both --review-pr and issue number/range"
+                    exit 1
+                fi
+                MODE="review"
+                shift
+                if [[ $# -gt 0 && ($1 =~ ^[0-9]+$ || $1 =~ ^[0-9]+-[0-9]+$) ]]; then
+                    PR_RANGE="$1"
+                    shift
+                else
+                    log_error "--review-pr requires a PR number or range"
+                    exit 1
+                fi
+                ;;
+            --bug)
+                if [ -n "$MODE" ]; then
+                    log_error "Cannot specify both --bug and other modes"
+                    exit 1
+                fi
+                MODE="bug"
+                shift
+                if [[ $# -gt 0 && -n "$1" ]]; then
+                    BUG_DESCRIPTION="$1"
+                    shift
+                else
+                    log_error "--bug requires a description in quotes"
+                    exit 1
+                fi
+                ;;
+            --project)
+                shift
+                if [[ $# -gt 0 && $1 =~ ^[0-9]+$ ]]; then
+                    PROJECT_ID="$1"
+                    shift
+                else
+                    log_error "--project requires a project ID"
+                    exit 1
+                fi
+                ;;
+            --prompt-only)
+                PROMPT_ONLY=true
+                shift
+                ;;
+            --interactive)
+                INTERACTIVE=true
+                shift
+                ;;
+            --auto-pr-review)
+                AUTO_PR_REVIEW=true
+                shift
+                ;;
+            --timeout)
+                shift
+                if [[ $# -gt 0 && $1 =~ ^[0-9]+$ ]]; then
+                    TIMEOUT_SECONDS="$1"
+                    shift
+                else
+                    log_error "--timeout requires a number of seconds"
+                    exit 1
+                fi
+                ;;
+            --help|-h)
+                show_usage
+                exit 0
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                show_usage
+                exit 1
+                ;;
+            *)
+                if [[ $1 =~ ^[0-9]+$ || $1 =~ ^[0-9]+-[0-9]+$ ]]; then
+                    if [ -n "$MODE" ]; then
+                        log_error "Cannot specify both issue number/range and other modes"
+                        exit 1
+                    fi
+                    MODE="implement"
+                    ISSUE_RANGE="$1"
+                    shift
+                else
+                    log_error "Invalid argument: $1"
+                    show_usage
+                    exit 1
+                fi
+                ;;
+        esac
+    done
+
+    # Validation
+    if [ -z "$MODE" ]; then
+        log_error "No command specified"
+        show_usage
+        exit 1
+    fi
+}
+
+# Parse range syntax (preserved from original)
+parse_range() {
+    local input="$1"
+    
+    if [[ $input =~ ^([0-9]+)-([0-9]+)$ ]]; then
+        local start="${BASH_REMATCH[1]}"
+        local end="${BASH_REMATCH[2]}"
+        
+        if [ "$start" -gt "$end" ]; then
+            log_error "Invalid range: start ($start) cannot be greater than end ($end)"
+            exit 1
+        fi
+        
+        seq "$start" "$end"
+    elif [[ $input =~ ^[0-9]+$ ]]; then
+        echo "$input"
+    else
+        log_error "Invalid range format: $input"
+        exit 1
+    fi
+}
+
+# Show usage information
+show_usage() {
+    cat << 'EOF'
+# Enhanced Claude Task Runner with Agent Coordination
+
+## Usage:
+  claude-task <issue_number> [options]                    # Implement single issue with agents
+  claude-task <start>-<end> [options]                     # Implement range with agents  
+  claude-task --review-pr <pr_number> [options]           # Review PR with agents
+  claude-task --review-pr <start>-<end> [options]         # Review PR range with agents
+  claude-task --bug "<description>" [options]             # Analyze bug with agents
+
+## Options:
+  --project <id>         Include GitHub project context
+  --prompt-only          Generate agent-targeted prompts without execution
+  --interactive          Use interactive Claude Code mode
+  --auto-pr-review       Auto-review PRs after implementation
+  --timeout <seconds>    Sleep between range tasks (default: 30)
+
+## Examples:
+  claude-task 316                                         # Agent-coordinated issue implementation
+  claude-task 230-250 --auto-pr-review                   # Range with auto-review
+  claude-task --review-pr 329                            # Agent-coordinated PR review  
+  claude-task --bug "Login fails with 500 error"         # Bug analysis with agents
+  claude-task 316 --prompt-only                          # Preview agent-targeted prompts
+
+## Agent Features:
+  🤖 **Automatic Agent Selection**: Determines best agent based on task complexity
+  📊 **Story Point Assessment**: Estimates complexity and decomposes large tasks
+  🎭 **Two-Stage Execution**: Agent-targeted Lyra-Dev prompts for complex tasks
+  🔧 **Single-Stage Execution**: Direct agent invocation for simple tasks  
+  🛡️ **Enhanced Git Safety**: All existing branch isolation and reset patterns
+  📝 **Agent Coordination**: Multiple agents work together on complex features
+
+## Available Agents:
+  - github-issue-implementer: Issue audit and implementation
+  - github-pr-reviewer: Comprehensive PR reviews
+  - github-bug-hunter: Bug investigation and reporting
+  - story-point-estimator: Task complexity and decomposition
+  - frontend-specialist: Frontend development tasks
+  - backend-specialist: Backend and API development
+  - security-auditor: Security analysis and compliance
+  - performance-analyzer: Performance optimization
+  - test-strategist: Testing strategy and implementation
+  - infrastructure-specialist: DevOps and deployment
+  - project-orchestrator: Multi-agent coordination
+
+## Requirements:
+  - Must be in git repository with GitHub remote
+  - Must have CLAUDE.md in project root
+  - Requires: claude, gh, git, jq
+  - Claude Code agents in .claude/agents/ (auto-created if missing)
+EOF
+}
+
+# Main execution function
+main() {
+    if [ $# -eq 0 ]; then
+        show_usage
+        exit 1
+    fi
+
+    parse_arguments "$@"
+
+    log_info "🤖 Enhanced Claude Task Runner with Agent Coordination"
+    log_info "Mode: $MODE | Interactive: $INTERACTIVE | Prompt Only: $PROMPT_ONLY"
+
+    check_dependencies "$PROMPT_ONLY"
+    validate_environment
+    get_repo_info
+
+    # Test Claude CLI if not in prompt-only mode
+    if [ "$PROMPT_ONLY" != "true" ]; then
+        log_info "Testing Claude CLI and agent availability..."
+        local test_output
+        test_output=$(echo "Say 'Agent coordination ready' and list available agents using /agents" | claude -p --dangerously-skip-permissions 2>&1)
+        if [[ "$test_output" == *"ready"* ]] || [[ "$test_output" == *"agent"* ]]; then
+            log_success "Claude CLI and agents are ready"
+        else
+            log_warning "Claude CLI test returned: ${test_output:0:100}..."
+        fi
+    fi
+
+    # Get project context
+    local project_info=""
+    if [ -n "$PROJECT_ID" ]; then
+        project_info=$(gh project view "$PROJECT_ID" --owner "$REPO_OWNER" --format json 2>/dev/null || echo "")
+    fi
+    
+    local claude_context
+    claude_context=$(cat CLAUDE.md)
+
+    # Handle different modes
+    case "$MODE" in
+        "implement")
+            local numbers_to_process
+            numbers_to_process=$(parse_range "$ISSUE_RANGE")
+            local is_range_mode=false
+            
+            if [[ $ISSUE_RANGE =~ - ]]; then
+                is_range_mode=true
+                log_range "🔨 Processing issue range: $ISSUE_RANGE with agent coordination"
+            fi
+            
+            local total_count=0
+            local success_count=0
+            
+            while IFS= read -r number; do
+                total_count=$((total_count + 1))
+                
+                if [ $total_count -gt 1 ] && [ "$is_range_mode" = true ]; then
+                    log_range "Waiting ${TIMEOUT_SECONDS} seconds before next task..."
+                    sleep "$TIMEOUT_SECONDS"
+                fi
+                
+                echo ""
+                echo "========================================"
+                echo "🤖 AGENT TASK $total_count: ISSUE #$number"
+                echo "========================================"
+                
+                if process_single_task "$number" "$MODE" "$project_info" "$claude_context" "$is_range_mode" "$AUTO_PR_REVIEW"; then
+                    success_count=$((success_count + 1))
+                fi
+                
+            done <<< "$numbers_to_process"
+            
+            echo ""
+            log_success "Agent coordination complete: $success_count/$total_count tasks successful"
+            ;;
+            
+        "review")
+            local numbers_to_process
+            numbers_to_process=$(parse_range "$PR_RANGE")
+            
+            while IFS= read -r number; do
+                echo ""
+                echo "========================================"
+                echo "🔍 AGENT REVIEW: PR #$number"
+                echo "========================================"
+                
+                process_single_task "$number" "$MODE" "$project_info" "$claude_context" false false
+                
+            done <<< "$numbers_to_process"
+            ;;
+            
+        "bug")
+            echo ""
+            echo "========================================"
+            echo "🐛 AGENT BUG ANALYSIS"
+            echo "========================================"
+            
+            if [ "$PROMPT_ONLY" = true ]; then
+                log_info "Generating bug analysis prompt..."
+                local target_agent="github-bug-hunter"
+                generate_agent_targeted_lyra_prompt "$target_agent" "new" "$BUG_DESCRIPTION" "$claude_context" ""
+            else
+                local bug_prompt="Use the github-bug-hunter agent to analyze this bug and create a comprehensive GitHub issue:
+
+Bug Description: \"$BUG_DESCRIPTION\"
+
+The agent should:
+1. Search the codebase for relevant code patterns
+2. Identify likely root causes
+3. Create detailed GitHub issue with reproduction steps
+4. Include specific file paths and potential fixes
+5. Add appropriate labels and priority assessment"
+
+                echo "$bug_prompt" | claude --dangerously-skip-permissions
+            fi
+            ;;
+    esac
+
+    echo ""
+    log_success "🎉 Enhanced Claude Task Runner with Agent Coordination - Complete!"
+    if [ "$PROMPT_ONLY" = true ]; then
+        log_info "Use without --prompt-only to execute with agent coordination"
+    fi
+}
+
+# Run main function
+main "$@"
