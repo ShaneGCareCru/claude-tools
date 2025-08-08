@@ -76,9 +76,17 @@ check_dependencies() {
         missing_tools+=("jq (JSON processor)")
     fi
 
-    # Only require claude command if not in prompt-only mode
-    if [ "$prompt_only" != "true" ] && ! command -v claude &> /dev/null; then
-        missing_tools+=("claude (Claude Code)")
+    # Only require coder command if not in prompt-only mode
+    if [ "$prompt_only" != "true" ]; then
+        if [ "$CODER" = "codex" ]; then
+            if ! command -v codex &> /dev/null; then
+                missing_tools+=("codex (Codex CLI)")
+            fi
+        else
+            if ! command -v claude &> /dev/null; then
+                missing_tools+=("claude (Claude Code)")
+            fi
+        fi
     fi
 
     if ! command -v git &> /dev/null; then
@@ -480,42 +488,24 @@ run_claude() {
     local prompt="$1"
     local outfile="$2" 
     local mode="$3"  # mode: interactive|headless
-
-    local claude_cmd=(claude --model sonnet --dangerously-skip-permissions)
-    [[ $mode == headless ]] && claude_cmd+=( -p )
-
-    # Use temporary file for reliable output capture in both modes
-    local temp_output="/tmp/claude-raw-$$-$RANDOM.txt"
     
-    if [[ $mode == headless ]]; then
-        # Headless mode - capture output directly to file
-        printf "%s\n" "$prompt" \
-            | "${claude_cmd[@]}" > "$temp_output" 2>&1
+    # Convert mode to boolean for execute_coder
+    local interactive_flag=$([[ $mode == "interactive" ]] && echo "true" || echo "false")
+    
+    # Execute using the configured coder (claude or codex)
+    if execute_coder "$prompt" "$outfile" "$interactive_flag"; then
+        # Verify output was written
+        if [ ! -s "$outfile" ]; then
+            echo "[ERROR] Output file is empty after $CODER execution" >&2
+            return 1
+        fi
+        
+        log_info "$CODER output captured ($(wc -c < "$outfile") bytes)"
+        return 0
     else
-        # Interactive mode - show output on screen and capture to file
-        printf "%s\n" "$prompt" \
-            | "${claude_cmd[@]}" \
-            | tee "$temp_output"
-    fi
-    
-    local exit_code=$?
-    if [ $exit_code -ne 0 ]; then
-        echo "[ERROR] Claude execution failed with exit code $exit_code" >&2
-        rm -f "$temp_output"
+        echo "[ERROR] $CODER execution failed" >&2
         return 1
     fi
-    
-    # Strip ANSI escape codes and write to final output file
-    sed -E 's/\x1B\[[0-9;]*[mK]//g' "$temp_output" > "$outfile"
-    rm -f "$temp_output"
-    
-    # Verify output was written
-    if [ ! -s "$outfile" ]; then
-        echo "[ERROR] Output file is empty after Claude execution" >&2
-        return 1
-    fi
-    
-    log_info "Claude output captured ($(wc -c < "$outfile") bytes)"
 }
 
 # ---------- Prompt-builder helpers ----------
@@ -707,7 +697,11 @@ build_prompt_with_claude() {
         else
             echo "[ERROR] No error output from Claude (stderr was empty)" >&2
         fi
-        echo "[INFO] To manually test, run: cat $prompt_file | claude -p --model sonnet --dangerously-skip-permissions --output-format json" >&2
+        if [ "$CODER" = "codex" ]; then
+            echo "[INFO] To manually test, run: cat $prompt_file | codex exec --model o3 --dangerously-bypass-approvals-and-sandbox" >&2
+        else
+            echo "[INFO] To manually test, run: cat $prompt_file | claude -p --model sonnet --dangerously-skip-permissions --output-format json" >&2
+        fi
         rm -f "$error_log"
         return 1
     fi
@@ -769,6 +763,76 @@ create_branch() {
     fi
 }
 
+# Execute coder (Claude or Codex) with proper parameters
+execute_coder() {
+    local final_prompt="$1"
+    local output_file="$2"
+    local interactive="$3"
+    local coder="${4:-$CODER}"  # Use provided coder or default
+    
+    if [ "$coder" = "codex" ]; then
+        execute_codex_with_retry "$final_prompt" "$output_file" "$interactive"
+    else
+        execute_claude_with_retry "$final_prompt" "$output_file" "$interactive"
+    fi
+}
+
+# Execute Codex with retry logic
+execute_codex_with_retry() {
+    local final_prompt="$1"
+    local output_file="$2"
+    local interactive="$3"
+    
+    log_info "Executing Codex with retry logic..."
+    
+    # Use temporary file for consistent output handling
+    local temp_output="/tmp/codex-raw-$$-$RANDOM.txt"
+    
+    for attempt in {1..5}; do
+        log_info "Codex attempt ${attempt}/5..."
+        
+        local codex_cmd
+        if [ "$interactive" = true ]; then
+            # Interactive mode for codex (no -p flag like claude)
+            codex_cmd="codex exec --model o3 --dangerously-bypass-approvals-and-sandbox"
+        else
+            # Codex exec is always non-interactive by default
+            codex_cmd="codex exec --model o3 --dangerously-bypass-approvals-and-sandbox"
+        fi
+        
+        # Execute and capture output
+        local exit_code
+        if [ "$interactive" = true ]; then
+            # Show output on screen and capture to file
+            echo "$final_prompt" | $codex_cmd | tee "$temp_output"
+            exit_code=$?
+        else
+            # Headless mode - capture output directly to file
+            echo "$final_prompt" | $codex_cmd > "$temp_output" 2>&1
+            exit_code=$?
+        fi
+        
+        if [ $exit_code -eq 0 ]; then
+            # Strip ANSI escape codes and write to final output file
+            sed -E 's/\x1B\[[0-9;]*[mK]//g' "$temp_output" > "$output_file"
+            rm -f "$temp_output"
+            log_success "Codex execution successful on attempt ${attempt}"
+            return 0
+        else
+            log_warning "Codex execution failed (attempt ${attempt}/5, exit code: ${exit_code})"
+            
+            if [ $attempt -lt 5 ]; then
+                log_info "Sleeping 90 seconds before retry due to potential rate limit..."
+                sleep 90
+            fi
+        fi
+    done
+    
+    rm -f "$temp_output"
+    log_error "Failed to execute Codex after 5 attempts"
+    return 1
+}
+
 # Execute Claude with retry logic for rate limiting
 execute_claude_with_retry() {
     local final_prompt="$1"
@@ -788,12 +852,28 @@ execute_claude_with_retry() {
         fi
         
         # Execute and capture output
-        if echo "$final_prompt" | $claude_cmd | tee "$output_file"; then
+        local exit_code
+        local temp_output="/tmp/claude-raw-$$-$RANDOM.txt"
+        
+        if [ "$interactive" = true ]; then
+            # Show output on screen and capture to file
+            echo "$final_prompt" | $claude_cmd | tee "$temp_output"
+            exit_code=$?
+        else
+            # Headless mode - capture output directly to file
+            echo "$final_prompt" | $claude_cmd > "$temp_output" 2>&1
+            exit_code=$?
+        fi
+        
+        if [ $exit_code -eq 0 ]; then
+            # Strip ANSI escape codes and write to final output file
+            sed -E 's/\x1B\[[0-9;]*[mK]//g' "$temp_output" > "$output_file"
+            rm -f "$temp_output"
             log_success "Claude execution successful on attempt ${attempt}"
             return 0
         else
-            local exit_code=$?
             log_warning "Claude execution failed (attempt ${attempt}/5, exit code: ${exit_code})"
+            rm -f "$temp_output"
             
             if [ $attempt -lt 5 ]; then
                 log_info "Sleeping 90 seconds before retry due to potential rate limit..."
@@ -883,6 +963,7 @@ show_usage() {
     echo "  --timeout <seconds> Sleep between tasks in range mode (default: 30 seconds)"
     echo "  --interactive       Use interactive Claude Code mode instead of headless (-p) mode"
     echo "  --auto-pr-review    Automatically review the PR after implementing an issue"
+    echo "  --coder <claude|codex> Select AI coder to use (default: claude)"
     echo ""
     echo "Examples:"
     echo "  $0 316                                    # Audit and implement single issue (headless)"
@@ -900,6 +981,8 @@ show_usage() {
     echo "  $0 --bug \"Login fails with 500 error\"  # Analyze bug and create GitHub issue"
     echo "  $0 --bug \"App crashes on startup\" --prompt-only  # Generate bug analysis prompt only"
     echo "  $0 --bug \"Payment processing timeout\" --interactive  # Interactive bug analysis"
+    echo "  $0 316 --coder codex                       # Use Codex instead of Claude"
+    echo "  $0 316 --coder codex --interactive         # Use Codex interactively"
     echo ""
     echo "Requirements:"
     echo "  - Must be run from a directory containing CLAUDE.md"
@@ -937,6 +1020,7 @@ parse_arguments() {
     INTERACTIVE=false
     AUTO_PR_REVIEW=false
     TIMEOUT_SECONDS=30  # Default timeout
+    CODER="claude"  # Default coder (claude or codex)
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -999,6 +1083,16 @@ parse_arguments() {
                     shift
                 else
                     log_error "--timeout requires a number of seconds"
+                    exit 1
+                fi
+                ;;
+            --coder)
+                shift
+                if [[ $# -gt 0 && ($1 == "claude" || $1 == "codex") ]]; then
+                    CODER="$1"
+                    shift
+                else
+                    log_error "--coder requires either 'claude' or 'codex'"
                     exit 1
                 fi
                 ;;
@@ -2227,17 +2321,25 @@ main() {
     log_info "Validating environment..."
     validate_environment
     
-    # Quick test of Claude CLI
+    # Quick test of selected coder CLI
     if [ "$PROMPT_ONLY" != "true" ]; then
-        log_info "Testing Claude CLI..."
+        log_info "Testing $CODER CLI..."
         local test_output
-        test_output=$(echo "Say 'test ok' and nothing else" | claude -p --model sonnet --dangerously-skip-permissions --output-format json 2>&1)
+        local test_cmd
+        
+        if [ "$CODER" = "codex" ]; then
+            test_cmd="codex exec --model o3 --dangerously-bypass-approvals-and-sandbox"
+        else
+            test_cmd="claude -p --model sonnet --dangerously-skip-permissions --output-format json"
+        fi
+        
+        test_output=$(echo "Say 'test ok' and nothing else" | $test_cmd 2>&1)
         local test_exit=$?
         
         if [ $test_exit -ne 0 ]; then
-            log_error "Claude CLI test failed with exit code $test_exit"
+            log_error "$CODER CLI test failed with exit code $test_exit"
             log_error "Output: $test_output"
-            log_error "Please check your Claude CLI installation and authentication"
+            log_error "Please check your $CODER CLI installation and authentication"
             exit 1
         fi
         
@@ -2276,24 +2378,23 @@ main() {
             echo "$bug_prompt"
             echo ""
             echo "========================================"
-            log_info "Use without --prompt-only to execute this prompt with Claude Code"
+            log_info "Use without --prompt-only to execute this prompt with $CODER"
             exit 0
         fi
         
         # Execute Claude with bug analysis prompt
-        log_info "Running Claude Code for bug analysis..."
+        log_info "Running $CODER for bug analysis..."
         
-        if [ "$INTERACTIVE" = true ]; then
-            echo "$bug_prompt" | claude
-        else
-            echo "$bug_prompt" | claude -p
-        fi
+        local bug_output="/tmp/bug-analysis-$$.md"
+        local interactive_flag=$([[ $INTERACTIVE == true ]] && echo "true" || echo "false")
         
-        if [ $? -eq 0 ]; then
+        if execute_coder "$bug_prompt" "$bug_output" "$interactive_flag"; then
             log_success "Bug analysis and GitHub issue creation completed"
             log_info "Check GitHub for the newly created bug report issue"
+            rm -f "$bug_output"
         else
             log_error "Bug analysis failed"
+            rm -f "$bug_output"
             exit 1
         fi
         
