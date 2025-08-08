@@ -1,14 +1,36 @@
 #!/bin/bash
 
-# Enhanced Claude Task Runner with Agents Integration
-# Combines sophisticated Lyra-Dev meta-prompts with Claude Code subagents
+# Enhanced Claude Task Runner - Lyra-Dev powered context-aware wrapper for Claude Code
 # Features:
-#   - Story point estimation and task decomposition via GitHub MCP
-#   - Specialized agents for different workflow types
-#   - Preserved Lyra-Dev meta-prompt system (now agent-targeted)
-#   - Enhanced git safety patterns with agent coordination
-#   - Two-stage execution for complex tasks, single-stage for simple ones
-#   - Intelligent agent delegation and orchestration
+#   - Two-stage Claude execution: prompt-builder → executor (eliminates meta-prompt issues)
+#   - Lyra-Dev 4-D methodology for optimized prompt generation  
+#   - CRITICAL: Status verification protocol to detect false completion claims
+#   - AUDIT-AND-IMPLEMENT workflow: Claude audits and fixes gaps in one run
+#   - Always comments audit results on issues/PRs for full transparency
+#   - Smart PR creation: only when actual code changes are made
+#   - Graceful handling of "already complete" cases (auto-closes, no unnecessary PRs)
+#   - Single task or range processing (e.g., 230-250)
+#   - Automatic branch creation for each task
+#   - Configurable timeout between tasks for API rate limiting
+#   - Interactive or headless mode support
+#   - Project-aware prompts using CLAUDE.md context
+#   - Gap analysis: focuses on actual missing pieces, not claimed completions
+#   - Robust retry logic with exponential backoff for API limits
+#
+# Workflow: 
+#   Issues: meta-prompt → optimized prompt → audit → implement gaps → comment → PR (if changes exist)
+#   PR Reviews: direct prompt → review analysis → gh pr comment (no branches/PRs/separate comments)
+#
+# Usage:
+#   claude-task <issue_number> [options]                                     - Audit and implement a single task
+#   claude-task <start_issue>-<end_issue> [options]                         - Audit and implement a range of tasks
+#   claude-task --review-pr <pr_number> [options]                           - Review a single PR (read-only analysis)
+#   claude-task --review-pr <start_pr>-<end_pr> [options]                   - Review a range of PRs (read-only analysis)
+#   --auto-pr-review flag: Automatically review PRs after issue implementation
+#
+# Requirements:
+#   - Must be run from a directory containing CLAUDE.md
+#   - Must be in a git repository with GitHub remote
 
 set -e
 
@@ -18,16 +40,28 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-PURPLE='\033[0;35m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
 # Logging functions
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-log_range() { echo -e "${CYAN}[RANGE]${NC} $1"; }
-log_agent() { echo -e "${PURPLE}[AGENT]${NC} $1"; }
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+log_range() {
+    echo -e "${CYAN}[RANGE]${NC} $1"
+}
 
 # Check if required tools are available
 check_dependencies() {
@@ -42,6 +76,7 @@ check_dependencies() {
         missing_tools+=("jq (JSON processor)")
     fi
 
+    # Only require claude command if not in prompt-only mode
     if [ "$prompt_only" != "true" ] && ! command -v claude &> /dev/null; then
         missing_tools+=("claude (Claude Code)")
     fi
@@ -53,103 +88,31 @@ check_dependencies() {
     if [ ${#missing_tools[@]} -ne 0 ]; then
         log_error "Missing required tools:"
         printf '%s\n' "${missing_tools[@]}"
+        echo ""
+        echo "Please install the missing tools and try again."
         exit 1
     fi
 }
 
-# Validate environment and agents
+# Validate environment
 validate_environment() {
+    # Check if we're in a git repository
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         log_error "This script must be run from within a git repository."
         exit 1
     fi
 
+    # Check if CLAUDE.md exists
     if [ ! -f "CLAUDE.md" ]; then
         log_error "CLAUDE.md not found in current directory."
+        log_error "This script must be run from a directory containing CLAUDE.md"
         exit 1
-    fi
-
-    # Check if agents are available
-    if [ ! -d ".claude/agents" ]; then
-        log_warning "No .claude/agents directory found. Creating agents..."
-        setup_agents_if_missing
-    fi
-
-    local agent_count=$(ls .claude/agents/*.md 2>/dev/null | wc -l)
-    if [ "$agent_count" -eq 0 ]; then
-        log_warning "No agents found. Creating default agent set..."
-        setup_agents_if_missing
-    else
-        log_success "Found $agent_count agents in .claude/agents/"
     fi
 
     log_success "Environment validation passed"
 }
 
-# Setup agents if missing
-setup_agents_if_missing() {
-    log_info "Setting up Claude Code agents..."
-    
-    # Create minimal agent set for core functionality
-    mkdir -p .claude/agents
-    
-    # GitHub Issue Implementer (essential)
-    cat > .claude/agents/github-issue-implementer.md << 'EOF'
----
-name: github-issue-implementer
-description: Use PROACTIVELY for GitHub issue implementation. Handles audit, gap analysis, surgical code changes, testing, and PR management following 4-D methodology.
-tools: Read, Write, Edit, Bash, Grep, Glob, Search
----
-
-You are a senior software engineer specializing in GitHub issue implementation using the 4-D methodology (DECONSTRUCT → DIAGNOSE → DEVELOP → DELIVER).
-
-**Core Process:**
-1. **DECONSTRUCT**: Analyze issue requirements vs current codebase
-2. **DIAGNOSE**: Verify claimed vs actual implementation status  
-3. **DEVELOP**: Plan surgical changes following CLAUDE.md guidelines
-4. **DELIVER**: Implement missing pieces with tests and documentation
-
-**Critical Rules:**
-- Always audit claimed status vs reality before coding
-- Only implement what's genuinely missing (surgical approach)
-- Follow ALL CLAUDE.md guidelines religiously
-- Post audit results as GitHub issue comment
-- Create detailed PR with gap analysis
-
-Focus on being surgical and precise, not reimplementing working functionality.
-EOF
-
-    # Story Point Estimator (for task decomposition)
-    cat > .claude/agents/story-point-estimator.md << 'EOF'
----
-name: story-point-estimator
-description: Use PROACTIVELY for story point estimation and GitHub issue decomposition. Creates subtask issues via GitHub MCP when >8 points.
-tools: Read, Bash, Search
----
-
-You are a senior engineering manager specializing in agile estimation and task breakdown.
-
-**Story Point Scale:**
-- 1-2 points: Simple (single file, <4 hours)
-- 3-5 points: Moderate (multiple files, 1-2 days)  
-- 8 points: Complex but manageable (3-5 days)
-- 13+ points: MUST decompose into 3-5 point subtasks
-
-**When >8 points, create subtasks using:**
-```bash
-gh issue create --title "Subtask: [specific task]" \
-                --body "[detailed acceptance criteria]" \
-                --label "subtask,epic:${parent_issue},points:${points}" \
-                --milestone "current-sprint"
-```
-
-Focus on accurate estimation and effective decomposition for better predictability.
-EOF
-
-    log_success "Essential agents created. Full agent setup available via separate script."
-}
-
-# Extract repository information
+# Extract repository information from git config
 get_repo_info() {
     local git_url
     git_url=$(git config --get remote.origin.url 2>/dev/null || {
@@ -157,10 +120,11 @@ get_repo_info() {
         exit 1
     })
 
+    # Extract owner and repo from URL (handles both SSH and HTTPS)
     if [[ $git_url =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
         REPO_OWNER="${BASH_REMATCH[1]}"
         REPO_NAME="${BASH_REMATCH[2]}"
-        REPO_NAME="${REPO_NAME%.git}"
+        REPO_NAME="${REPO_NAME%.git}"  # Remove .git suffix if present
     else
         log_error "Could not parse GitHub repository from git URL: $git_url"
         exit 1
@@ -169,12 +133,13 @@ get_repo_info() {
     log_info "Repository: ${REPO_OWNER}/${REPO_NAME}"
 }
 
-# Workspace hygiene - enhanced with agent coordination
+# Workspace hygiene - clean state before each task
 workspace_hygiene() {
-    log_info "Cleaning workspace for agent coordination..."
+    log_info "Cleaning workspace..."
     git reset --hard || true
     git clean -fd || true
     
+    # Ensure we're on main/master
     local main_branch
     if git show-ref --verify --quiet refs/heads/main; then
         main_branch="main"
@@ -187,310 +152,410 @@ workspace_hygiene() {
     
     git checkout "$main_branch" || true
     git pull origin "$main_branch" || true
-    
-    # Clean up any previous agent context files
-    rm -f /tmp/agent-context-*.md /tmp/claude-*.txt /tmp/*.json 2>/dev/null || true
-    
-    log_success "Workspace cleaned and ready for agent coordination"
+    log_success "Workspace cleaned and updated"
 }
 
-# Story point assessment with task decomposition
-assess_and_potentially_decompose() {
-    local issue_number="$1"
-    local issue_details="$2"
+# Always commit and push changes (simplified - only called when changes exist)
+commit_and_push() {
+    local branch_name="$1"
+    local number="$2"  # issue/PR number for reference
+    local mode="$3"    # implement | review
     
-    log_agent "Assessing story points and potential decomposition for issue #${issue_number}..."
+    log_info "=== COMMIT AND PUSH DEBUG FOR ${mode} #${number} ==="
+    log_info "Branch: ${branch_name}"
+    log_info "Current branch: $(git branch --show-current)"
     
-    # Create assessment prompt for story-point-estimator agent
-    local assessment_prompt="Use the story-point-estimator agent to analyze GitHub issue #${issue_number}:
-
-**Task**: Estimate story points and decompose if necessary
-
-**Process**:
-1. **Analyze Complexity**: Review issue requirements, acceptance criteria, technical scope
-2. **Estimate Points**: Use Fibonacci scale (1,2,3,5,8,13,21) based on:
-   - Implementation complexity
-   - Number of systems/files affected
-   - Unknown factors requiring research
-   - Testing and documentation scope
-3. **Decompose if >8 Points**: Create subtask issues via GitHub MCP with:
-   - Clear acceptance criteria per subtask
-   - Proper labels (subtask, epic:${issue_number}, points:X)
-   - Dependencies between subtasks
-   - Target 3-5 points per subtask
-4. **Output Decision**: READY_TO_IMPLEMENT or DECOMPOSED_INTO_SUBTASKS
-
-**Issue Details**:
-${issue_details}
-
-**Repository**: ${REPO_OWNER}/${REPO_NAME}
-**Issue URL**: https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/${issue_number}"
-
-    local assessment_file="/tmp/story-assessment-${issue_number}.md"
-    
-    if [ "$INTERACTIVE" = true ]; then
-        echo "$assessment_prompt" | claude --dangerously-skip-permissions | tee "$assessment_file"
-    else
-        echo "$assessment_prompt" | claude -p --dangerously-skip-permissions | tee "$assessment_file"
+    # Verify we're on the expected branch
+    if [ "$(git branch --show-current)" != "$branch_name" ]; then
+        log_warning "WARNING: Expected to be on branch '${branch_name}' but on '$(git branch --show-current)'"
     fi
     
-    # Check if subtasks were created
-    sleep 2  # Give GitHub API time to update
-    local subtask_issues=$(gh issue list --repo "${REPO_OWNER}/${REPO_NAME}" \
-                          --search "label:subtask label:epic:${issue_number}" \
-                          --json number,title --jq '.[].number' 2>/dev/null || echo "")
+    log_info "Git status before staging:"
+    git status --porcelain | head -10 | while read status_line; do
+        log_info "  ${status_line}"
+    done
     
-    if [ -n "$subtask_issues" ] && [ "$subtask_issues" != "" ]; then
-        log_success "Issue decomposed into subtasks: $(echo $subtask_issues | tr '\n' ' ')"
-        echo "DECOMPOSED:$subtask_issues"
-    else
-        log_info "Issue assessed as manageable size for direct implementation"
-        echo "READY_TO_IMPLEMENT"
+    # Stage all changes
+    log_info "Staging all changes with 'git add -A'..."
+    git add -A
+    
+    log_info "Git status after staging:"
+    git status --porcelain | head -10 | while read status_line; do
+        log_info "  ${status_line}"
+    done
+    
+    # Check what's actually staged
+    if git diff --cached --quiet; then
+        log_warning "No staged changes found - nothing to commit!"
+        return 0
     fi
-}
-
-# Enhanced Lyra-Dev prompt generation - now agent-targeted
-generate_agent_targeted_lyra_prompt() {
-    local target_agent="$1"
-    local issue_number="$2"
-    local issue_details="$3"
-    local claude_context="$4"
-    local additional_context="$5"
     
-    log_info "Generating agent-targeted Lyra-Dev prompt for: $target_agent"
-    
-    cat << EOF
-# Lyra-Dev: Agent-Targeted Prompt Optimizer
-
-You are **Lyra-Dev**, an elite AI prompt optimizer creating a **fully-formed, self-reliant prompt** specifically for the **${target_agent} agent**.
-
-Since you know the target agent's specialization, you can:
-- **Dial down generic context** (agent already has domain expertise)
-- **Focus on issue-specific requirements** 
-- **Pre-strategize the solution path** using CLAUDE.md constraints
-- **Ensure structured 4-D methodology output**
-
-## Target Agent: ${target_agent}
-
-This agent specializes in: $(get_agent_specialization "$target_agent")
-
-## 🔄 THE 4-D METHODOLOGY (Agent-Targeted Edition)
-
-### 1. DECONSTRUCT (Agent-Aware)
-- Extract task intent specific to ${target_agent}'s domain
-- Map issue requirements to agent's area of expertise  
-- Identify deliverables the agent is designed to produce
-
-### 2. DIAGNOSE (Pre-Strategized)
-- **CRITICAL**: Agent must verify claimed completion status
-- Check for domain-specific constraints from CLAUDE.md
-- Pre-load codebase patterns the agent should follow
-- Account for integration with other systems
-
-### 3. DEVELOP (Agent-Optimized)
-- Select approach optimized for ${target_agent}'s capabilities
-- Embed CLAUDE.md guidelines relevant to this agent's work
-- Plan output that fits agent's standard deliverable patterns
-
-### 4. DELIVER (Structured Output)
-- Agent MUST use exact 4-D headers in response
-- Follow agent's specialized workflow patterns
-- Include agent-appropriate GitHub integration commands
-
-## 📋 PROJECT CONTEXT
-
-**Repository:** ${REPO_OWNER}/${REPO_NAME}
-**Target Agent:** ${target_agent}
-**Issue:** #${issue_number}
-
-### Project Guidelines (CLAUDE.md)
-\`\`\`
-${claude_context}
-\`\`\`
-
-${additional_context}
-
-## 🛠️ AGENT-SPECIFIC OPTIMIZATION
-
-**Task for Lyra-Dev**: Generate a prompt that tells the ${target_agent} agent to:
-
-1. **Use 4-D Methodology**: DECONSTRUCT → DIAGNOSE → DEVELOP → DELIVER
-2. **Follow Agent Specialization**: Leverage the agent's domain expertise
-3. **Apply CLAUDE.md Rules**: Follow ALL project-specific guidelines
-4. **Produce Agent-Appropriate Output**: Match the agent's standard deliverable format
-5. **Integrate with GitHub**: Use appropriate gh commands for the agent's role
-
-## 📝 ISSUE CONTEXT
-
-**GitHub Issue #${issue_number}:**
-${issue_details}
-
----
-
-**Generate the optimized prompt that will be sent to the ${target_agent} agent.**
-
-The prompt should be **concise but complete** (under 3000 chars when possible), **actionable**, and **structured** to ensure the agent follows the 4-D methodology while producing high-quality, project-compliant deliverables.
-EOF
-}
-
-# Get agent specialization description
-get_agent_specialization() {
-    local agent_name="$1"
-    
-    case "$agent_name" in
-        "github-issue-implementer")
-            echo "GitHub issue audit, gap analysis, surgical code implementation, testing, and PR creation"
-            ;;
-        "github-pr-reviewer")
-            echo "Comprehensive PR technical review, CLAUDE.md compliance checking, security analysis"
-            ;;
-        "github-bug-hunter")
-            echo "Bug investigation, root cause analysis, GitHub issue creation with detailed reports"
-            ;;
-        "story-point-estimator")
-            echo "Story point estimation, task complexity analysis, GitHub issue decomposition"
-            ;;
-        "project-orchestrator")
-            echo "Multi-agent coordination, complex feature delivery, cross-functional project management"
-            ;;
-        *)
-            echo "Specialized development workflow automation"
-            ;;
-    esac
-}
-
-# Determine appropriate agent for task
-determine_target_agent() {
-    local mode="$1"
-    local issue_details="$2"
-    local pr_details="$3"
-    
-    case "$mode" in
-        "implement")
-            # Check if this is a complex issue that needs orchestration
-            if echo "$issue_details" | grep -q -i "epic\|large\|complex\|multiple.*system\|full.*stack"; then
-                echo "project-orchestrator"
-            else
-                echo "github-issue-implementer"
-            fi
-            ;;
-        "review")
-            echo "github-pr-reviewer"
-            ;;
-        "bug")
-            echo "github-bug-hunter"
-            ;;
-        *)
-            echo "github-issue-implementer"
-            ;;
-    esac
-}
-
-# Enhanced two-stage execution with agent targeting
-execute_two_stage_with_agent() {
-    local target_agent="$1"
-    local issue_number="$2"
-    local issue_details="$3"
-    local claude_context="$4"
-    local additional_context="$5"
-    
-    log_info "🎭 Two-stage execution targeting: $target_agent"
-    
-    # Stage 1: Agent-targeted Lyra-Dev prompt generation
-    log_info "Stage 1: Generating agent-targeted Lyra-Dev prompt..."
-    
-    local meta_prompt
-    meta_prompt=$(generate_agent_targeted_lyra_prompt "$target_agent" "$issue_number" "$issue_details" "$claude_context" "$additional_context")
-    
-    local builder_json="/tmp/agent-builder-${issue_number}.json"
-    local builder_txt="/tmp/agent-prompt-${issue_number}.txt"
-    
-    if ! build_prompt_with_llm "$meta_prompt" "$builder_json" "$builder_txt"; then
-        log_error "Agent-targeted prompt builder failed for $target_agent"
+    # Commit (we know changes exist since this is only called after diff check)
+    local commit_msg="🤖 ${branch_name}: automated changes from Claude"
+    log_info "Committing with message: '${commit_msg}'"
+    if git commit -m "$commit_msg"; then
+        log_success "Changes committed successfully"
+        local commit_hash=$(git rev-parse HEAD)
+        log_info "Commit hash: ${commit_hash}"
+    else
+        log_error "Failed to commit changes"
         return 1
     fi
     
-    log_success "Agent-targeted prompt generated ($(wc -c < "$builder_txt") bytes)"
-    
-    # Stage 2: Execute optimized prompt with target agent
-    log_info "Stage 2: Executing optimized prompt with $target_agent agent..."
-    
-    local output_file="/tmp/agent-output-${issue_number}.md"
-    local optimized_prompt
-    optimized_prompt=$(cat "$builder_txt")
-    
-    # Add explicit agent invocation to ensure proper delegation
-    local agent_prompt="Use the ${target_agent} agent for this task:
-
-${optimized_prompt}"
-    
-    if [ "$INTERACTIVE" = true ]; then
-        echo "$agent_prompt" | claude --dangerously-skip-permissions | tee "$output_file"
+    # Push the branch
+    log_info "Pushing branch '${branch_name}' to origin..."
+    if git push -u origin "$branch_name"; then
+        log_success "Branch pushed to origin: ${branch_name}"
+        local remote_url
+        remote_url=$(git remote get-url origin)
+        log_info "Remote URL: ${remote_url}"
     else
-        echo "$agent_prompt" | claude -p --dangerously-skip-permissions | tee "$output_file"
+        log_error "Failed to push branch: ${branch_name}"
+        return 1
+    fi
+    
+    log_info "=== END COMMIT AND PUSH DEBUG ==="
+    return 0
+}
+
+# Create or update a PR (simplified - only called when changes exist)
+ensure_pr() {
+    local number="$1"        # issue or PR original number
+    local branch="$2"        # branch_name
+    local mode="$3"          # implement | review
+    local body_file="$4"     # temp file containing Claude's output
+    
+    log_info "=== PR CREATION/UPDATE DEBUG FOR ${mode} #${number} ==="
+    log_info "Branch: ${branch}"
+    log_info "Body file: ${body_file}"
+    
+    # Check if PR already exists for this branch
+    log_info "Checking if PR already exists for branch ${branch}..."
+    if gh pr view "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" &>/dev/null; then
+        log_info "FOUND EXISTING PR for branch ${branch} - updating body..."
+        local existing_pr_info
+        existing_pr_info=$(gh pr view "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --json number,title,url)
+        log_info "Existing PR details: $existing_pr_info"
+        
+        # Extract PR number for return
+        local existing_pr_number
+        existing_pr_number=$(echo "$existing_pr_info" | jq -r '.number' 2>/dev/null || echo "")
+        
+        if gh pr edit "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$body_file"; then
+            log_success "PR updated for branch: ${branch}"
+        else
+            log_warning "Failed to update PR body for branch: ${branch}"
+        fi
+        
+        # Return PR number for tracking
+        echo "$existing_pr_number"
+    else
+        log_info "No existing PR found for branch ${branch} - creating new PR..."
+        
+        # Check if there are any existing PRs for this issue
+        if [ "$mode" = "implement" ]; then
+            log_info "Checking for other PRs that might be related to issue #${number}..."
+            local related_prs
+            related_prs=$(gh pr list --repo "${REPO_OWNER}/${REPO_NAME}" --search "#${number}" --json number,title,headRefName --limit 5)
+            if [ "$related_prs" != "[]" ] && [ -n "$related_prs" ]; then
+                log_warning "FOUND OTHER PRs THAT MENTION ISSUE #${number}:"
+                echo "$related_prs" | jq -r '.[] | "  PR #\(.number): \(.title) (branch: \(.headRefName))"' 2>/dev/null || echo "$related_prs"
+                log_warning "*** CREATING ANOTHER PR FOR THE SAME ISSUE - IS THIS INTENDED? ***"
+            fi
+        fi
+        
+        local title
+        if [ "$mode" = "implement" ]; then
+            title="🤖 Issue #$number – automated implementation"
+        else
+            title="🤖 PR #$number – automated review"
+        fi
+        
+        local main_branch="main"
+        if ! git show-ref --verify --quiet refs/heads/main; then
+            main_branch="master"
+        fi
+        
+        log_info "Creating PR: title='${title}', base='${main_branch}', head='${branch}'"
+        if gh pr create --repo "${REPO_OWNER}/${REPO_NAME}" --base "$main_branch" --head "$branch" \
+                        --title "$title" --body-file "$body_file" >/dev/null; then
+            local new_pr_info
+            new_pr_info=$(gh pr view "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --json number,url)
+            local new_pr_url
+            new_pr_url=$(echo "$new_pr_info" | jq -r '.url' 2>/dev/null || echo "")
+            local new_pr_number
+            new_pr_number=$(echo "$new_pr_info" | jq -r '.number' 2>/dev/null || echo "")
+            
+            log_success "NEW PR created for branch: ${branch}"
+            log_success "PR URL: ${new_pr_url}"
+            
+            # Return PR number for tracking
+            echo "$new_pr_number"
+        else
+            log_error "Failed to create PR for branch: ${branch}"
+            return 1
+        fi
+    fi
+    
+    log_info "=== END PR DEBUG ==="
+}
+
+# Always comment on the issue or PR
+issue_comment() {
+    local number="$1"
+    local body_file="$2"
+    local mode="$3"  # implement | review
+    
+    log_info "Adding comment to ${mode} #${number}..."
+    
+    # Debug: check if body file exists and its size
+    if [ ! -f "$body_file" ]; then
+        log_error "Body file $body_file does not exist"
+        return 1
+    fi
+    
+    local file_size=$(wc -c < "$body_file" 2>/dev/null || echo "0")
+    log_info "Body file size: $file_size bytes"
+    
+    if [ "$file_size" -eq 0 ]; then
+        log_warning "Body file is empty - this will result in truncated comment"
+        echo "## Debug Info" > /tmp/empty-comment-debug.md
+        echo "The audit output file was empty. This indicates Claude execution may have failed." >> /tmp/empty-comment-debug.md
+        echo "Check the logs for Claude execution errors." >> /tmp/empty-comment-debug.md
+        body_file="/tmp/empty-comment-debug.md"
+        file_size=$(wc -c < "$body_file")
+    fi
+    
+    # Create a comment with summary (compatible capitalization)
+    local mode_cap
+    case $mode in
+        implement) mode_cap="Implementation" ;;
+        review) mode_cap="Review" ;;
+        *) mode_cap="Task" ;;
+    esac
+    
+    local comment_file="/tmp/comment-${number}.md"
+    {
+        echo "🤖 **Automated ${mode_cap} Complete**"
+        echo ""
+        echo "**Branch**: \`$(git branch --show-current)\`"
+        echo "**Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo ""
+        echo "## Analysis"
+        echo ""
+        
+        # For PR reviews: include FULL analysis (no truncation)
+        # For implementations: show key audit results with reasonable limit
+        if [ "$mode" = "review" ]; then
+            # PR reviews need full analysis - no truncation!
+            cat "$body_file"
+        else
+            # Implementation mode: show first 3000 chars but always include audit conclusions
+            local file_size=$(wc -c < "$body_file")
+            if [ $file_size -le 3000 ]; then
+                # Small enough, show everything
+                cat "$body_file"
+            else
+                # Show first part and look for key audit sections
+                head -c 2500 "$body_file"
+                echo ""
+                echo "..."
+                echo ""
+                # Always include status/conclusion sections if they exist
+                if grep -q -i "STATUS\|CONCLUSION\|RESULT\|COMPLETE\|AUDIT.*SUMMARY\|NO.*CHANGES.*NEEDED\|ALREADY.*COMPLETE" "$body_file"; then
+                    echo "## Key Findings"
+                    grep -A 5 -i "STATUS\|CONCLUSION\|RESULT\|COMPLETE\|AUDIT.*SUMMARY\|NO.*CHANGES.*NEEDED\|ALREADY.*COMPLETE" "$body_file" | tail -10
+                fi
+                echo ""
+                echo "... (full details in branch: \`$(git branch --show-current)\`)"
+            fi
+        fi
+    } > "$comment_file"
+    
+    if [ "$mode" = "implement" ]; then
+        if gh issue comment "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$comment_file"; then
+            log_success "Comment added to issue #${number}"
+        else
+            log_warning "Failed to add comment to issue #${number}"
+        fi
+    else
+        if gh pr comment "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$comment_file"; then
+            log_success "Comment added to PR #${number}"
+        else
+            log_warning "Failed to add comment to PR #${number}"
+        fi
+    fi
+    
+    rm -f "$comment_file"
+}
+
+# Optionally close issue if completely implemented
+maybe_close_issue() {
+    local number="$1"
+    local audit_file="$2"
+    
+    # Check if the audit indicates completion
+    if grep -q -i "NOW 100% Complete\|Fully Complete\|Implementation Complete\|Status.*Complete" "$audit_file"; then
+        log_info "Detected completion indicators, attempting to close issue #${number}..."
+        
+        local pr_number
+        pr_number=$(gh pr view --repo "${REPO_OWNER}/${REPO_NAME}" --json number -q .number 2>/dev/null || echo "unknown")
+        
+        if gh issue close "$number" --repo "${REPO_OWNER}/${REPO_NAME}" \
+                        --comment "✅ Automated implementation complete. See PR #${pr_number} for details." 2>/dev/null; then
+            log_success "Issue #${number} closed automatically"
+        else
+            log_info "Could not auto-close issue #${number} (may already be closed or lack permissions)"
+        fi
+    else
+        log_info "No completion indicators found, leaving issue #${number} open"
+    fi
+}
+
+# Execute Claude with retry logic for rate limiting
+# Helper function for timestamps
+_ts() { 
+    date +%s 
+}
+
+# Check if branch has no commits ahead of main
+branch_is_empty() {
+    # returns 0 (true) if the branch has no commits ahead of main
+    git rev-list --count origin/main..HEAD >/dev/null 2>&1
+    [ $? -eq 0 ] && [ "$(git rev-list --count origin/main..HEAD)" -eq 0 ]
+}
+
+# Enhanced logging for debugging branch/PR issues
+debug_existing_state() {
+    local number="$1"
+    local mode="$2"
+    
+    log_info "=== DEBUGGING EXISTING STATE FOR ${mode} #${number} ==="
+    
+    if [ "$mode" = "implement" ]; then
+        # Check for existing PRs linked to this issue
+        log_info "Checking for existing PRs linked to issue #${number}..."
+        local linked_prs
+        linked_prs=$(gh pr list --repo "${REPO_OWNER}/${REPO_NAME}" --search "closes:#${number} OR fixes:#${number} OR issue #${number}" --json number,title,headRefName,state 2>/dev/null || echo "[]")
+        
+        if [ "$linked_prs" != "[]" ] && [ -n "$linked_prs" ]; then
+            log_warning "FOUND EXISTING PRs FOR ISSUE #${number}:"
+            echo "$linked_prs" | jq -r '.[] | "  PR #\(.number): \(.title) (branch: \(.headRefName), state: \(.state))"' 2>/dev/null || echo "$linked_prs"
+        else
+            log_info "No existing PRs found for issue #${number}"
+        fi
+        
+        # Check for existing branches that might be related
+        log_info "Checking for existing branches related to issue #${number}..."
+        local related_branches
+        related_branches=$(git branch -r | grep -E "issue-${number}|${number}" | head -5 || true)
+        
+        if [ -n "$related_branches" ]; then
+            log_warning "FOUND EXISTING BRANCHES RELATED TO ISSUE #${number}:"
+            echo "$related_branches" | while read branch; do
+                log_warning "  ${branch}"
+            done
+        else
+            log_info "No existing branches found for issue #${number}"
+        fi
+    fi
+    
+    # Show current branch and status
+    log_info "Current branch: $(git branch --show-current)"
+    log_info "Current working tree status:"
+    if git diff --quiet; then
+        log_info "  Working tree is clean"
+    else
+        log_warning "  Working tree has uncommitted changes!"
+        git status --porcelain | head -10 | while read status_line; do
+            log_warning "    ${status_line}"
+        done
+    fi
+    
+    log_info "=== END DEBUGGING STATE ==="
+}
+
+# Run Claude and capture clean output to file while showing colors on screen
+run_claude() {
+    local prompt="$1"
+    local outfile="$2" 
+    local mode="$3"  # mode: interactive|headless
+
+    local claude_cmd=(claude --model sonnet --dangerously-skip-permissions)
+    [[ $mode == headless ]] && claude_cmd+=( -p )
+
+    # Use temporary file for reliable output capture in both modes
+    local temp_output="/tmp/claude-raw-$$-$RANDOM.txt"
+    
+    if [[ $mode == headless ]]; then
+        # Headless mode - capture output directly to file
+        printf "%s\n" "$prompt" \
+            | "${claude_cmd[@]}" > "$temp_output" 2>&1
+    else
+        # Interactive mode - show output on screen and capture to file
+        printf "%s\n" "$prompt" \
+            | "${claude_cmd[@]}" \
+            | tee "$temp_output"
     fi
     
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then
-        log_error "Agent execution failed: $target_agent"
+        echo "[ERROR] Claude execution failed with exit code $exit_code" >&2
+        rm -f "$temp_output"
         return 1
     fi
     
-    # Verify agent was actually used (check for agent-specific patterns in output)
-    if ! grep -q "DECONSTRUCT\|DIAGNOSE\|DEVELOP\|DELIVER" "$output_file"; then
-        log_warning "Agent may not have followed 4-D methodology - check output"
+    # Strip ANSI escape codes and write to final output file
+    sed -E 's/\x1B\[[0-9;]*[mK]//g' "$temp_output" > "$outfile"
+    rm -f "$temp_output"
+    
+    # Verify output was written
+    if [ ! -s "$outfile" ]; then
+        echo "[ERROR] Output file is empty after Claude execution" >&2
+        return 1
     fi
     
-    # Clean up intermediate files
-    rm -f "$builder_json" "$builder_txt"
-    
-    echo "$output_file"
-    return 0
+    log_info "Claude output captured ($(wc -c < "$outfile") bytes)"
 }
 
-# Single-stage execution (for simple tasks or direct agent invocation)
-execute_single_stage_with_agent() {
-    local target_agent="$1"
-    local simple_prompt="$2"
-    local issue_number="$3"
-    
-    log_info "🔧 Single-stage execution with: $target_agent"
-    
-    local output_file="/tmp/agent-simple-${issue_number}.md"
-    local agent_prompt="Use the ${target_agent} agent to:
+# ---------- Prompt-builder helpers ----------
 
-${simple_prompt}
-
-Follow the 4-D methodology (DECONSTRUCT → DIAGNOSE → DEVELOP → DELIVER) and ensure all CLAUDE.md guidelines are followed."
-    
-    if [ "$INTERACTIVE" = true ]; then
-        echo "$agent_prompt" | claude --dangerously-skip-permissions | tee "$output_file"
-    else
-        echo "$agent_prompt" | claude -p --dangerously-skip-permissions | tee "$output_file"
-    fi
-    
-    echo "$output_file"
-}
-
-# Build prompt using LLM (preserved from original)
+# (a) run LLM for meta-prompt optimization (replaces Claude for large prompts)
 build_prompt_with_llm() {
     local meta_prompt="$1"
     local json_out="$2"
     local text_out="$3"
 
-    log_info "Building agent-targeted prompt with LLM (input: ${#meta_prompt} chars)..."
+    log_info "Building prompt with LLM (input: ${#meta_prompt} chars)..."
     
+    # Save prompt for debugging
     local prompt_file="/tmp/llm-prompt-${RANDOM}.txt"
     printf '%s\n' "$meta_prompt" > "$prompt_file"
+    local prompt_size=$(wc -c < "$prompt_file")
+    log_info "LLM meta-prompt saved to: $prompt_file (${prompt_size} bytes)"
     
+    # Create error log file
+    local error_log="/tmp/llm-error-${RANDOM}.log"
+    local output_log="/tmp/llm-output-${RANDOM}.log"
+    
+    # Test if llm command exists and is executable
     if ! command -v llm &> /dev/null; then
-        log_error "LLM command not found - falling back to Claude"
-        return build_prompt_with_claude "$meta_prompt" "$json_out" "$text_out"
+        log_error "LLM command not found in PATH"
+        return 1
     fi
     
-    cat "$prompt_file" | llm 2>/dev/null | tee "$text_out" >/dev/null
+    # Show the exact command being run
+    log_info "Executing: llm (default model: gpt-4o-mini)"
     
-    # Create fake JSON for compatibility
+    # Use LLM with larger context capacity than Claude
+    cat "$prompt_file" | llm 2>"$error_log" \
+        | tee "$output_log" > "$text_out"
+    
+    # Log output file sizes
+    local output_size=$(wc -c < "$text_out" 2>/dev/null || echo "0")
+    log_info "LLM output size: ${output_size} bytes"
+    
+    # Create a fake JSON output for compatibility (LLM outputs text directly)
     cat > "$json_out" << EOF
 {
   "type": "result",
@@ -500,62 +565,203 @@ build_prompt_with_llm() {
 }
 EOF
     
+    # Clean up temp file
     rm -f "$prompt_file"
-    
-    local text_size=$(wc -c < "$text_out" 2>/dev/null || echo "0")
-    if [ "$text_size" -eq 0 ]; then
-        log_error "LLM returned empty response"
+
+    # Check for command failures
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "[ERROR] LLM command failed with exit code $exit_code" >&2
+        if [ -f "$error_log" ] && [ -s "$error_log" ]; then
+            echo "[ERROR] LLM stderr: $(cat "$error_log")" >&2
+        else
+            echo "[ERROR] No error output from LLM (stderr was empty)" >&2
+        fi
+        rm -f "$error_log"
+        return 1
+    fi
+
+    # Debug: Check what we got from LLM
+    if [ ! -f "$json_out" ]; then
+        echo "[ERROR] No JSON output file created" >&2
         return 1
     fi
     
-    log_info "Agent-targeted prompt generated successfully"
-    return 0
+    local json_size=$(wc -c < "$json_out" 2>/dev/null || echo "0")
+    local text_size=$(wc -c < "$text_out" 2>/dev/null || echo "0")
+    echo "[DEBUG] JSON output size: $json_size bytes, Text output size: $text_size bytes" >&2
+    
+    if [ "$text_size" -eq 0 ]; then
+        echo "[ERROR] LLM returned empty response" >&2
+        echo "[DEBUG] Raw output saved to: $output_log" >&2
+        echo "[DEBUG] First 500 chars of raw output: $(head -c 500 "$output_log" 2>/dev/null || echo 'no output')" >&2
+        if [ -f "$error_log" ] && [ -s "$error_log" ]; then
+            echo "[ERROR] LLM stderr: $(cat "$error_log")" >&2
+        else
+            echo "[ERROR] No error output from LLM (stderr was empty)" >&2
+        fi
+        echo "[INFO] To manually test, run: cat $prompt_file | llm" >&2
+        rm -f "$error_log"
+        return 1
+    fi
+    
+    # Clean up error log on success
+    rm -f "$error_log"
 }
 
-# Fallback: Build prompt with Claude (preserved from original)
+# (b) run first Claude pass and capture raw JSON + extracted text (original function kept as fallback)
 build_prompt_with_claude() {
     local meta_prompt="$1"
     local json_out="$2"
     local text_out="$3"
 
-    log_info "Building prompt with Claude (fallback)..."
+    log_info "Building prompt with Claude (input: ${#meta_prompt} chars)..."
+    
+    # Check if prompt is very large (Claude can handle 100k+ tokens, roughly 400k+ chars)
+    if [ ${#meta_prompt} -gt 200000 ]; then
+        log_warning "Prompt is very large (${#meta_prompt} chars), may approach token limits"
+    fi
     
     if [ ${#meta_prompt} -gt 400000 ]; then
-        log_error "Prompt extremely large, likely exceeds token limits"
+        log_error "Prompt is extremely large (${#meta_prompt} chars), likely exceeds token limits"
         return 1
     fi
     
+    # Save prompt for debugging
+    local prompt_file="/tmp/claude-prompt-${RANDOM}.txt"
+    printf '%s\n' "$meta_prompt" > "$prompt_file"
+    log_info "Prompt saved to: $prompt_file for debugging"
+    
+    # Create error log file
+    local error_log="/tmp/claude-error-${RANDOM}.log"
+    local output_log="/tmp/claude-output-${RANDOM}.log"
+    
+    # Test if claude command exists and is executable
+    if ! command -v claude &> /dev/null; then
+        log_error "Claude command not found in PATH"
+        return 1
+    fi
+    
+    # Show the exact command being run
+    log_info "Executing: claude -p --model sonnet --dangerously-skip-permissions --output-format json"
+    
+    # Use timeout command to prevent hanging on large prompts
+    # Save prompt to file to avoid pipe buffering issues with large prompts
     local temp_input="/tmp/claude-input-${RANDOM}.txt"
     printf '%s\n' "$meta_prompt" > "$temp_input"
     
-    claude -p --model sonnet --dangerously-skip-permissions --output-format json < "$temp_input" 2>/dev/null \
+    # Run Claude with file input - no timeout, let it run as long as needed
+    claude -p --model sonnet --dangerously-skip-permissions --output-format json < "$temp_input" 2>"$error_log" \
+        | tee "$output_log" \
         | jq '.' >"$json_out" 2>/dev/null
     
-    jq -r 'if (.result? // "") != "" then .result else empty end' "$json_out" >"$text_out"
+    # Extract the result field from the JSON
+    jq -r '
+            # Debug: let user see what fields are available
+            (if env.DEBUG then . else empty end),
+            # 2025-06 CLI shape - try multiple possible locations
+            if (.result? // "") != "" then .result
+            elif (.response? // "") != "" then .response  
+            elif (.content? // "") != "" then .content
+            elif (.text? // "") != "" then .text
+            # 2025-02 "message.content" shape
+            elif (.choices[0].message.content? // "") != "" then .choices[0].message.content
+            # 2025-04 "content" rename
+            elif (.choices[0].content? // "") != "" then .choices[0].content
+            # 2024 shape
+            elif (.choices[0].text? // "") != "" then .choices[0].text
+            # Last resort: try to find ANY non-empty string field
+            elif (.choices[0]? // {} | to_entries[] | select(.value | type == "string" and length > 0) | .value) then (.choices[0]? // {} | to_entries[] | select(.value | type == "string" and length > 0) | .value | first)
+            else empty end
+        ' "$json_out" >"$text_out"
     
+    # Clean up temp file
     rm -f "$temp_input"
+
+    # Check for command failures
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "[ERROR] Claude command failed with exit code $exit_code" >&2
+        if [ -f "$error_log" ]; then
+            echo "[ERROR] Claude stderr: $(cat "$error_log")" >&2
+        fi
+        rm -f "$error_log"
+        return 1
+    fi
+
+    # Debug: Check what we got from Claude
+    if [ ! -f "$json_out" ]; then
+        echo "[ERROR] No JSON output file created" >&2
+        return 1
+    fi
     
+    local json_size=$(wc -c < "$json_out" 2>/dev/null || echo "0")
+    echo "[DEBUG] JSON output size: $json_size bytes" >&2
+    
+    if [ "$json_size" -eq 0 ]; then
+        echo "[ERROR] Claude returned empty response" >&2
+        echo "[DEBUG] Raw output saved to: $output_log" >&2
+        echo "[DEBUG] First 500 chars of raw output: $(head -c 500 "$output_log" 2>/dev/null || echo 'no output')" >&2
+        if [ -f "$error_log" ] && [ -s "$error_log" ]; then
+            echo "[ERROR] Claude stderr: $(cat "$error_log")" >&2
+        else
+            echo "[ERROR] No error output from Claude (stderr was empty)" >&2
+        fi
+        echo "[INFO] To manually test, run: cat $prompt_file | claude -p --model sonnet --dangerously-skip-permissions --output-format json" >&2
+        rm -f "$error_log"
+        return 1
+    fi
+
+    # Fail fast if no usable prompt was extracted
     if [[ ! -s $text_out ]]; then
-        log_error "Claude builder produced no usable prompt"
+        echo "[ERROR] Builder produced no usable prompt – aborting. Available fields in JSON:" >&2
+        echo "[ERROR] $(jq -r 'keys' "$json_out" 2>/dev/null || echo "Could not parse JSON")" >&2
+        echo "[DEBUG] First 500 chars of JSON: $(head -c 500 "$json_out" 2>/dev/null)" >&2
+        rm -f "$error_log"
         return 1 
     fi
     
-    return 0
+    # Clean up error log on success
+    rm -f "$error_log"
 }
 
-# Create timestamped branch (preserved from original)
+# (b) legacy helper - no longer used but kept for compatibility
+extract_prompt_text() {
+    local json_in="$1"             # /tmp/issue-N-prompt.json
+    local prompt_out="$2"          # /tmp/issue-N-prompt.txt
+
+    jq -r '
+        # 2025-06 CLI shape
+        if (.result? // "") != "" then .result
+        # 2025-02 "message.content" shape
+        elif (.choices[0].message.content? // "") != "" then .choices[0].message.content
+        # 2025-04 "content" rename
+        elif (.choices[0].content? // "") != "" then .choices[0].content
+        # 2024 shape
+        elif (.choices[0].text? // "") != "" then .choices[0].text
+        else empty end
+    ' "$json_in" >"$prompt_out"
+}
+
+
+
+# Create a new branch with timestamp (PURE - only outputs branch name)
 create_branch() {
     local number="$1"
-    local type="$2"
+    local type="$2"  # "issue" or "pr"
     local branch_name
 
+    # Use timestamped branch names to avoid conflicts on re-runs
     if [ "$type" = "issue" ]; then
-        branch_name="issue-${number}-$(date +%s)"
+        branch_name="issue-${number}-$(_ts)"
     else
-        branch_name="review-pr-${number}-$(date +%s)"
+        branch_name="review-pr-${number}-$(_ts)"
     fi
 
+    # Create and checkout new branch (workspace already cleaned by workspace_hygiene)
+    # Use -B to force creation/reset and checkout main as base
     if git checkout -B "$branch_name" main >/dev/null 2>&1; then
+        # PURE OUTPUT: only the branch name, no logging
         echo "$branch_name"
         return 0
     else
@@ -563,289 +769,164 @@ create_branch() {
     fi
 }
 
-# Commit and push changes (preserved from original)
-commit_and_push() {
-    local branch_name="$1"
-    local number="$2"
-    local mode="$3"
+# Execute Claude with retry logic for rate limiting
+execute_claude_with_retry() {
+    local final_prompt="$1"
+    local output_file="$2"
+    local interactive="$3"
     
-    log_info "Committing and pushing changes for ${mode} #${number}..."
+    log_info "Executing Claude Code with retry logic..."
     
-    if git diff --cached --quiet && git diff --quiet; then
-        log_warning "No changes to commit"
-        return 0
-    fi
-    
-    git add -A
-    
-    if git diff --cached --quiet; then
-        log_warning "No staged changes found"
-        return 0
-    fi
-    
-    local commit_msg="🤖 ${branch_name}: automated ${mode} via agent coordination"
-    if git commit -m "$commit_msg"; then
-        log_success "Changes committed successfully"
+    for attempt in {1..5}; do
+        log_info "Claude attempt ${attempt}/5..."
         
-        if git push -u origin "$branch_name"; then
-            log_success "Branch pushed to origin: ${branch_name}"
+        local claude_cmd
+        if [ "$interactive" = true ]; then
+            claude_cmd="claude --model sonnet --dangerously-skip-permissions"
         else
-            log_error "Failed to push branch: ${branch_name}"
-            return 1
-        fi
-    else
-        log_error "Failed to commit changes"
-        return 1
-    fi
-    
-    return 0
-}
-
-# Create or update PR (preserved from original but enhanced with agent context)
-ensure_pr() {
-    local number="$1"
-    local branch="$2"
-    local mode="$3"
-    local body_file="$4"
-    
-    log_info "Creating/updating PR for ${mode} #${number}..."
-    
-    if gh pr view "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" &>/dev/null; then
-        log_info "Updating existing PR for branch ${branch}..."
-        gh pr edit "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$body_file"
-        local pr_number=$(gh pr view "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --json number -q '.number')
-        echo "$pr_number"
-    else
-        local title
-        if [ "$mode" = "implement" ]; then
-            title="🤖 Issue #$number – agent-coordinated implementation"
-        else
-            title="🤖 PR #$number – agent-coordinated review"
+            claude_cmd="claude -p --model sonnet --dangerously-skip-permissions"
         fi
         
-        local main_branch="main"
-        if ! git show-ref --verify --quiet refs/heads/main; then
-            main_branch="master"
-        fi
-        
-        if gh pr create --repo "${REPO_OWNER}/${REPO_NAME}" --base "$main_branch" --head "$branch" \
-                        --title "$title" --body-file "$body_file" >/dev/null; then
-            local new_pr_number=$(gh pr view "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --json number -q '.number')
-            log_success "PR created: #${new_pr_number}"
-            echo "$new_pr_number"
-        else
-            log_error "Failed to create PR for branch: ${branch}"
-            return 1
-        fi
-    fi
-}
-
-# Issue comment (preserved from original)
-issue_comment() {
-    local number="$1"
-    local body_file="$2"
-    local mode="$3"
-    
-    log_info "Adding agent coordination comment to ${mode} #${number}..."
-    
-    if [ ! -f "$body_file" ]; then
-        log_error "Body file $body_file does not exist"
-        return 1
-    fi
-    
-    local comment_file="/tmp/agent-comment-${number}.md"
-    {
-        echo "🤖 **Agent-Coordinated ${mode^} Complete**"
-        echo ""
-        echo "**Agent Used**: $(grep -o "Use the [a-z-]* agent" "$body_file" | head -1 | sed 's/Use the \(.*\) agent/\1/' || echo "Multiple agents")"
-        echo "**Branch**: \`$(git branch --show-current)\`"
-        echo "**Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-        echo ""
-        echo "## Agent Analysis"
-        echo ""
-        cat "$body_file"
-    } > "$comment_file"
-    
-    if [ "$mode" = "implement" ]; then
-        if gh issue comment "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$comment_file"; then
-            log_success "Agent comment added to issue #${number}"
-        else
-            log_warning "Failed to add comment to issue #${number}"
-        fi
-    else
-        if gh pr comment "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$comment_file"; then
-            log_success "Agent comment added to PR #${number}"
-        else
-            log_warning "Failed to add comment to PR #${number}"
-        fi
-    fi
-    
-    rm -f "$comment_file"
-}
-
-# Main task processing with agent coordination
-process_single_task() {
-    local number="$1"
-    local mode="$2"
-    local project_info="$3"  
-    local claude_context="$4"
-    local is_range_mode="$5"
-    local auto_pr_review="$6"
-    
-    local task_type
-    if [ "$mode" = "implement" ]; then
-        task_type="issue"
-        log_range "🔨 Processing issue #${number} with agent coordination..."
-    else
-        task_type="pr"
-        log_range "🔍 Processing PR #${number} with agent coordination..."
-    fi
-
-    # Early exit for prompt-only mode
-    if [ "$PROMPT_ONLY" = true ]; then
-        log_info "Prompt-only mode: generating agent-targeted prompts..."
-        
-        local details
-        if [ "$mode" = "implement" ]; then
-            details=$(gh issue view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body,labels --jq '.title + "\n\n" + .body' 2>/dev/null || echo "Issue details unavailable")
-        else
-            details=$(gh pr view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body --jq '.title + "\n\n" + .body' 2>/dev/null || echo "PR details unavailable")
-        fi
-        
-        local target_agent=$(determine_target_agent "$mode" "$details" "$details")
-        
-        echo "==================== AGENT-TARGETED LYRA-DEV PROMPT ===================="
-        generate_agent_targeted_lyra_prompt "$target_agent" "$number" "$details" "$claude_context" ""
-        echo ""
-        echo "Target Agent: $target_agent"
-        echo "====================== PROMPT PREVIEW END ========================"
-        return 0
-    fi
-
-    # Full automation mode
-    workspace_hygiene
-
-    # Fetch task details
-    local details
-    if [ "$mode" = "implement" ]; then
-        details=$(gh issue view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body,labels,assignees,milestone,url,comments 2>/dev/null || {
-            log_error "Could not fetch issue #${number}"
-            return 1
-        })
-    else
-        details=$(gh pr view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body,headRefName,baseRefName,author,additions,deletions,changedFiles,commits,reviewDecision,mergeable,url 2>/dev/null || {
-            log_error "Could not fetch PR #${number}"
-            return 1
-        })
-    fi
-
-    # Story point assessment and potential decomposition (only for issues)
-    if [ "$mode" = "implement" ]; then
-        local assessment_result
-        assessment_result=$(assess_and_potentially_decompose "$number" "$details")
-        
-        if [[ "$assessment_result" == "DECOMPOSED:"* ]]; then
-            local subtasks=$(echo "$assessment_result" | cut -d: -f2)
-            log_success "Issue decomposed into subtasks: $subtasks"
-            
-            # Process each subtask
-            echo "$subtasks" | tr ' ' '\n' | while read -r subtask_num; do
-                if [ -n "$subtask_num" ]; then
-                    log_info "Processing subtask issue #${subtask_num}..."
-                    process_single_task "$subtask_num" "$mode" "$project_info" "$claude_context" false "$auto_pr_review"
-                    sleep 30  # Rate limiting
-                fi
-            done
-            
+        # Execute and capture output
+        if echo "$final_prompt" | $claude_cmd | tee "$output_file"; then
+            log_success "Claude execution successful on attempt ${attempt}"
             return 0
-        fi
-        
-        log_info "Issue ready for direct implementation"
-    fi
-
-    # Determine target agent
-    local target_agent=$(determine_target_agent "$mode" "$details" "$details")
-    log_agent "Selected agent: $target_agent"
-
-    # Create branch for implementation
-    local branch_name=""
-    if [ "$mode" = "implement" ]; then
-        if ! branch_name=$(create_branch "$number" "$task_type"); then
-            log_error "Failed to create branch for ${task_type} #${number}"
-            return 1
-        fi
-        log_success "Created branch: ${branch_name}"
-    fi
-
-    # Execute with appropriate strategy
-    local output_file
-    local issue_complexity=$(echo "$details" | jq -r '.body' | wc -w)
-    
-    if [ "$issue_complexity" -gt 200 ] || echo "$details" | grep -q -i "complex\|architecture\|multiple.*system"; then
-        log_info "Complex task detected - using two-stage execution"
-        output_file=$(execute_two_stage_with_agent "$target_agent" "$number" "$details" "$claude_context" "$project_info")
-    else
-        log_info "Simple task detected - using single-stage execution"
-        local simple_prompt
-        if [ "$mode" = "implement" ]; then
-            simple_prompt="Implement GitHub issue #${number} following CLAUDE.md guidelines. Focus on surgical changes and comprehensive testing."
         else
-            simple_prompt="Review GitHub PR #${number} for code quality, security, and CLAUDE.md compliance. Provide actionable feedback."
-        fi
-        output_file=$(execute_single_stage_with_agent "$target_agent" "$simple_prompt" "$number")
-    fi
-    
-    if [ $? -ne 0 ] || [ ! -f "$output_file" ]; then
-        log_error "Agent execution failed for ${task_type} #${number}"
-        return 1
-    fi
-
-    log_success "Agent execution completed for ${task_type} #${number}"
-
-    # Handle post-processing based on mode
-    if [ "$mode" = "implement" ]; then
-        # Post audit comment on issue
-        issue_comment "$number" "$output_file" "$mode"
-        
-        # Check for changes and create PR
-        if git diff --quiet; then
-            log_success "No code changes needed - task appears complete"
-            return 0
-        fi
-
-        log_info "Code changes detected, proceeding with commit and PR creation..."
-
-        if ! commit_and_push "$branch_name" "$number" "$mode"; then
-            log_error "Failed to commit/push changes for ${task_type} #${number}"
-            return 1
-        fi
-
-        if ! git diff --quiet main...HEAD; then
-            local created_pr_number
-            created_pr_number=$(ensure_pr "$number" "$branch_name" "$mode" "$output_file")
+            local exit_code=$?
+            log_warning "Claude execution failed (attempt ${attempt}/5, exit code: ${exit_code})"
             
-            if [ $? -ne 0 ]; then
-                log_error "Failed to create/update PR for ${task_type} #${number}"
-                return 1
-            fi
-            
-            # Auto-review if requested
-            if [ "$auto_pr_review" = true ] && [ -n "$created_pr_number" ]; then
-                log_info "🤖 Auto-reviewing created PR #${created_pr_number}..."
-                sleep 5  # Give GitHub time to process PR creation
-                process_single_task "$created_pr_number" "review" "$project_info" "$claude_context" false false
+            if [ $attempt -lt 5 ]; then
+                log_info "Sleeping 90 seconds before retry due to potential rate limit..."
+                sleep 90
             fi
         fi
-    else
-        # PR review mode - Claude agent should have posted comment directly
-        log_success "PR review completed via agent delegation"
-    fi
-
-    log_success "Completed agent-coordinated workflow for ${task_type} #${number}"
-    return 0
+    done
+    
+    log_error "Claude execution failed after 5 attempts"
+    return 1
 }
 
-# Parse command line arguments (preserved from original)
+# Parse range syntax (e.g., "230-250" or "230")
+parse_range() {
+    local input="$1"
+    
+    if [[ $input =~ ^([0-9]+)-([0-9]+)$ ]]; then
+        # Range format: start-end
+        local start="${BASH_REMATCH[1]}"
+        local end="${BASH_REMATCH[2]}"
+        
+        if [ "$start" -gt "$end" ]; then
+            log_error "Invalid range: start ($start) cannot be greater than end ($end)"
+            exit 1
+        fi
+        
+        # Return array of numbers
+        seq "$start" "$end"
+    elif [[ $input =~ ^[0-9]+$ ]]; then
+        # Single number
+        echo "$input"
+    else
+        log_error "Invalid range format: $input (expected: number or start-end)"
+        exit 1
+    fi
+}
+
+# Fetch project information if project ID is provided
+get_project_info() {
+    local project_id="$1"
+    
+    if [ -z "$project_id" ]; then
+        echo ""
+        return
+    fi
+
+    log_info "Fetching project #${project_id} details..."
+    
+    local project_info
+    project_info=$(gh project view "$project_id" --owner "$REPO_OWNER" --format json 2>/dev/null || {
+        log_warning "Could not fetch project #${project_id}. Proceeding without project context."
+        echo ""
+        return
+    })
+
+    if [ -n "$project_info" ]; then
+        log_success "Project information loaded"
+        echo "$project_info"
+    else
+        echo ""
+    fi
+}
+
+# Read and prepare CLAUDE.md content
+get_claude_context() {
+    if [ ! -f "CLAUDE.md" ]; then
+        log_error "CLAUDE.md not found"
+        exit 1
+    fi
+
+    log_info "Loading project context from CLAUDE.md..."
+    cat "CLAUDE.md"
+}
+
+# Show usage information
+show_usage() {
+    echo "Usage:"
+    echo "  $0 <github_issue_number> [options]                                   - Implement a single task"
+    echo "  $0 <start_issue>-<end_issue> [options]                              - Implement a range of tasks"
+    echo "  $0 --review-pr <pr_number> [options]                                - Review a single PR"
+    echo "  $0 --review-pr <start_pr>-<end_pr> [options]                        - Review a range of PRs"
+    echo "  $0 --bug \"<description>\" [options]                                  - Analyze bug and create GitHub issue"
+    echo ""
+    echo "Options:"
+    echo "  --project <id>      Include GitHub project context (optional)"
+    echo "  --prompt-only       Generate and display the prompt without executing Claude Code"
+    echo "  --timeout <seconds> Sleep between tasks in range mode (default: 30 seconds)"
+    echo "  --interactive       Use interactive Claude Code mode instead of headless (-p) mode"
+    echo "  --auto-pr-review    Automatically review the PR after implementing an issue"
+    echo ""
+    echo "Examples:"
+    echo "  $0 316                                    # Audit and implement single issue (headless)"
+    echo "  $0 230-250                               # Audit and implement range of issues (headless)"
+    echo "  $0 230-250 --timeout 60                 # Range with 60s timeout between tasks"
+    echo "  $0 316 --project 3                      # With project context"
+    echo "  $0 316 --prompt-only                    # Generate Lyra-Dev prompt only"
+    echo "  $0 316 --interactive                    # Single issue with interactive mode"
+    echo "  $0 316 --auto-pr-review                 # Implement issue and auto-review the created PR"
+    echo "  $0 403-405 --auto-pr-review             # Implement range and auto-review all created PRs"
+    echo "  $0 --review-pr 329                      # Review single PR (read-only analysis)"
+    echo "  $0 --review-pr 325-330                  # Review range of PRs (read-only analysis)"
+    echo "  $0 --review-pr 325-330 --timeout 45     # Range with 45s timeout"
+    echo "  $0 --review-pr 329 --interactive        # Interactive PR review (posts comment)"
+    echo "  $0 --bug \"Login fails with 500 error\"  # Analyze bug and create GitHub issue"
+    echo "  $0 --bug \"App crashes on startup\" --prompt-only  # Generate bug analysis prompt only"
+    echo "  $0 --bug \"Payment processing timeout\" --interactive  # Interactive bug analysis"
+    echo ""
+    echo "Requirements:"
+    echo "  - Must be run from a directory containing CLAUDE.md"
+    echo "  - Must be in a git repository with GitHub remote"
+    echo "  - Requires: gh (GitHub CLI), git, claude (Claude Code), jq (JSON processor)"
+    echo ""
+    echo "Range Mode Features:"
+    echo "  - TWO-STAGE EXECUTION for ISSUES: prompt-builder Claude → executor Claude (eliminates meta-prompts)"
+    echo "  - SINGLE-STAGE EXECUTION for PR REVIEWS: direct review prompt → gh pr comment"
+    echo "  - IMPLEMENTATION MODE: Claude audits and fixes gaps in one run (creates branches/PRs)"
+    echo "  - REVIEW MODE: Direct PR analysis with actionable feedback via GitHub CLI comments"
+    echo "  - BUG REPORT MODE: Analyzes codebase to identify likely causes and creates detailed GitHub issues"
+    echo "  - Issue comments: posts audit results for transparency (implementation mode only)"
+    echo "  - Smart PR creation: only when actual code changes are made (implementation mode only)"
+    echo "  - Creates timestamped branches for each task (implementation mode only)"
+    echo "  - Auto-closes issues when audit shows they're already complete"
+    echo "  - Gracefully handles mixed scenarios (some complete, some need work)"
+    echo "  - Automatically sleeps between tasks to prevent API rate limiting"
+    echo "  - Continues processing even if individual tasks fail"
+    echo "  - Use --interactive for manual control of each Claude Code session"
+    echo "  - Default headless mode (-p) processes tasks automatically"
+    echo "  - Uses Lyra-Dev framework for optimized prompt generation (implementation mode)"
+    echo "  - CRITICAL: Status verification prevents duplicate work on 'completed' tasks"
+    echo "  - Robust retry logic with exponential backoff for API rate limits"
+}
+
+# Parse command line arguments
 parse_arguments() {
     MODE=""
     ISSUE_RANGE=""
@@ -855,7 +936,7 @@ parse_arguments() {
     PROMPT_ONLY=false
     INTERACTIVE=false
     AUTO_PR_REVIEW=false
-    TIMEOUT_SECONDS=30
+    TIMEOUT_SECONDS=30  # Default timeout
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -870,7 +951,7 @@ parse_arguments() {
                     PR_RANGE="$1"
                     shift
                 else
-                    log_error "--review-pr requires a PR number or range"
+                    log_error "--review-pr requires a PR number or range (e.g., 325 or 325-330)"
                     exit 1
                 fi
                 ;;
@@ -885,7 +966,7 @@ parse_arguments() {
                     BUG_DESCRIPTION="$1"
                     shift
                 else
-                    log_error "--bug requires a description in quotes"
+                    log_error "--bug requires a description in quotes (e.g., --bug \"Login fails with 500 error\")"
                     exit 1
                 fi
                 ;;
@@ -931,6 +1012,7 @@ parse_arguments() {
                 exit 1
                 ;;
             *)
+                # This should be an issue number or range for implementation mode
                 if [[ $1 =~ ^[0-9]+$ || $1 =~ ^[0-9]+-[0-9]+$ ]]; then
                     if [ -n "$MODE" ]; then
                         log_error "Cannot specify both issue number/range and other modes"
@@ -940,7 +1022,7 @@ parse_arguments() {
                     ISSUE_RANGE="$1"
                     shift
                 else
-                    log_error "Invalid argument: $1"
+                    log_error "Invalid argument: $1 (expected: number, range, --review-pr, or --bug)"
                     show_usage
                     exit 1
                 fi
@@ -948,214 +1030,1363 @@ parse_arguments() {
         esac
     done
 
-    # Validation
+    # Validate arguments
     if [ -z "$MODE" ]; then
         log_error "No command specified"
         show_usage
         exit 1
     fi
-}
 
-# Parse range syntax (preserved from original)
-parse_range() {
-    local input="$1"
+    if [ "$MODE" = "implement" ] && [ -z "$ISSUE_RANGE" ]; then
+        log_error "Issue number or range required for implementation mode"
+        exit 1
+    fi
+
+    if [ "$MODE" = "review" ] && [ -z "$PR_RANGE" ]; then
+        log_error "PR number or range required for review mode"
+        exit 1
+    fi
+
+    if [ "$MODE" = "bug" ] && [ -z "$BUG_DESCRIPTION" ]; then
+        log_error "Bug description required for bug report mode"
+        exit 1
+    fi
+
+    if [ -n "$PROJECT_ID" ] && ! [[ "$PROJECT_ID" =~ ^[0-9]+$ ]]; then
+        log_error "Project ID must be a positive integer"
+        exit 1
+    fi
+
+    if ! [[ "$TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+        log_error "Timeout must be a positive integer (seconds)"
+        exit 1
+    fi
+
+    # Validate conflicting options
+    if [ "$PROMPT_ONLY" = true ] && [ "$INTERACTIVE" = true ]; then
+        log_error "Cannot use --prompt-only and --interactive together"
+        exit 1
+    fi
     
-    if [[ $input =~ ^([0-9]+)-([0-9]+)$ ]]; then
-        local start="${BASH_REMATCH[1]}"
-        local end="${BASH_REMATCH[2]}"
-        
-        if [ "$start" -gt "$end" ]; then
-            log_error "Invalid range: start ($start) cannot be greater than end ($end)"
-            exit 1
-        fi
-        
-        seq "$start" "$end"
-    elif [[ $input =~ ^[0-9]+$ ]]; then
-        echo "$input"
-    else
-        log_error "Invalid range format: $input"
+    if [ "$AUTO_PR_REVIEW" = true ] && [ "$MODE" != "implement" ]; then
+        log_error "--auto-pr-review can only be used with issue implementation mode (not --review-pr or --bug)"
         exit 1
     fi
 }
 
-# Show usage information
-show_usage() {
+# Generate the base Lyra-Dev prompt framework
+generate_base_lyra_prompt() {
+    local repo_owner="$1"
+    local repo_name="$2"
+    local claude_context="$3"
+    local project_info="$4"
+
     cat << 'EOF'
-# Enhanced Claude Task Runner with Agent Coordination
+# Lyra-Dev: Claude-Compatible Prompt Optimizer for Software Tasks
 
-## Usage:
-  claude-task <issue_number> [options]                    # Implement single issue with agents
-  claude-task <start>-<end> [options]                     # Implement range with agents  
-  claude-task --review-pr <pr_number> [options]           # Review PR with agents
-  claude-task --review-pr <start>-<end> [options]         # Review PR range with agents
-  claude-task --bug "<description>" [options]             # Analyze bug with agents
+You are **Lyra-Dev**, an elite AI prompt optimizer embedded in a dev workflow. Your role is to transform stitched-together context — from READMEs, codebase rules, and tasks (e.g. kanban cards, PRs) — into a **fully-formed, self-reliant prompt** tailored for Claude (Code model), ready for autonomous execution with no back-and-forth interaction.
 
-## Options:
-  --project <id>         Include GitHub project context
-  --prompt-only          Generate agent-targeted prompts without execution
-  --interactive          Use interactive Claude Code mode
-  --auto-pr-review       Auto-review PRs after implementation
-  --timeout <seconds>    Sleep between range tasks (default: 30)
+You never ask questions. Instead, you **reason through missing details**, assume safe defaults, and state those assumptions in the output. Your prompts must always be actionable, context-aware, and structured.
 
-## Examples:
-  claude-task 316                                         # Agent-coordinated issue implementation
-  claude-task 230-250 --auto-pr-review                   # Range with auto-review
-  claude-task --review-pr 329                            # Agent-coordinated PR review  
-  claude-task --bug "Login fails with 500 error"         # Bug analysis with agents
-  claude-task 316 --prompt-only                          # Preview agent-targeted prompts
+**CRITICAL**: Generate CONCISE prompts (under 3000 characters when possible) that are clear and actionable. Avoid excessive repetition or verbose instructions.
 
-## Agent Features:
-  🤖 **Automatic Agent Selection**: Determines best agent based on task complexity
-  📊 **Story Point Assessment**: Estimates complexity and decomposes large tasks
-  🎭 **Two-Stage Execution**: Agent-targeted Lyra-Dev prompts for complex tasks
-  🔧 **Single-Stage Execution**: Direct agent invocation for simple tasks  
-  🛡️ **Enhanced Git Safety**: All existing branch isolation and reset patterns
-  📝 **Agent Coordination**: Multiple agents work together on complex features
+---
 
-## Available Agents:
-  - github-issue-implementer: Issue audit and implementation
-  - github-pr-reviewer: Comprehensive PR reviews
-  - github-bug-hunter: Bug investigation and reporting
-  - story-point-estimator: Task complexity and decomposition
-  - frontend-specialist: Frontend development tasks
-  - backend-specialist: Backend and API development
-  - security-auditor: Security analysis and compliance
-  - performance-analyzer: Performance optimization
-  - test-strategist: Testing strategy and implementation
-  - infrastructure-specialist: DevOps and deployment
-  - project-orchestrator: Multi-agent coordination
+## 🔄 THE 4-D METHODOLOGY (Headless Software Edition)
 
-## Requirements:
-  - Must be in git repository with GitHub remote
-  - Must have CLAUDE.md in project root
-  - Requires: claude, gh, git, jq
-  - Claude Code agents in .claude/agents/ (auto-created if missing)
+### 1. DECONSTRUCT
+- Extract task intent, key entities (files, services, APIs), and project context.
+- Identify output requirements: code, test, rationale, config, etc.
+- Map what is provided vs. what is missing (README, rules, task description).
+
+### 2. DIAGNOSE
+- Check for ambiguity or unclear expectations.
+- **CRITICAL: Verify claimed completion status** - Many tasks claim to be "done" when they're not.
+- Identify missing constraints or implicit assumptions.
+- **Gap Analysis**: Compare claimed vs actual implementation state.
+- If any required information is absent, infer it from surrounding context or apply safe defaults.
+
+### 3. DEVELOP
+- Select the right approach based on task type:
+  - **Bug Fixes** → Constraint-based logic, minimal change, clarity
+  - **New Features** → Step-by-step reasoning, layered context
+  - **Refactors** → Chain-of-thought logic + pattern recognition
+  - **PR Reviews** → Multi-perspective analysis + rules enforcement
+  - **Status Verification** → Audit claimed vs actual, focus on gaps only
+- Assign a role to Claude (e.g. "Act as a senior backend engineer").
+- Embed project rules, output format requirements, and tone (if applicable).
+
+### 4. DELIVER
+- Output the optimized prompt that INSTRUCTS Claude to use the 4-D methodology.
+- The prompt you create must tell Claude to structure its response as: DECONSTRUCT → DIAGNOSE → DEVELOP → DELIVER
+- Include explicit instructions for Claude to follow the 4-D workflow in its implementation.
+- **CRITICAL**: Emphasize that Claude MUST follow ALL rules and guidelines from CLAUDE.md throughout the implementation.
+- Embed context, clarify assumptions, and specify that Claude must use the 4-D format.
+- The final prompt should make Claude act as a senior engineer using the 4-D methodology while strictly adhering to CLAUDE.md guidelines.
+
+---
+
+## ⚙️ OPTIMIZATION TECHNIQUES
+
+**Foundation:**  
+- Role assignment  
+- Context layering  
+- Output specification  
+- Task decomposition  
+
+**Advanced:**  
+- Chain-of-thought reasoning  
+- Constraint optimization  
+- Multi-perspective evaluation  
+- Few-shot learning (if examples are available)  
+
+---
+
+## 📝 OUTPUT PROMPT REQUIREMENTS
+
+Your generated prompt for Claude MUST include these elements:
+
+**1. Role Assignment:**
+```
+You are a senior software engineer implementing [specific task].
+```
+
+**2. 4-D Methodology Instruction (MANDATORY):**
+```
+You MUST structure your entire response using the 4-D methodology with these EXACT section headers:
+
+# DECONSTRUCT
+[Analyze the task requirements and current codebase state]
+
+# DIAGNOSE  
+[Identify gaps between requirements and current implementation]
+
+# DEVELOP
+[Plan your implementation approach following CLAUDE.md guidelines]
+
+# DELIVER
+[Implement the code, tests, and documentation according to CLAUDE.md rules]
+
+IMPORTANT: Use these exact headers (DECONSTRUCT, DIAGNOSE, DEVELOP, DELIVER) - NOT "Design, Deploy, Document" or other variations.
+```
+
+**3. CLAUDE.md Compliance (CRITICAL):**
+```
+IMPORTANT: You MUST follow ALL guidelines and rules specified in CLAUDE.md. Key areas to pay attention to:
+- Project-specific coding conventions and patterns
+- Required tools and workflows (e.g., Conda environments, testing frameworks)
+- Infrastructure patterns (e.g., Tofu/Terraform for GCP resources)
+- File organization and naming conventions
+- Any deprecated patterns or legacy components to avoid
+- Security and authentication requirements
+
+Before writing any code, review the CLAUDE.md guidelines and ensure your implementation adheres to ALL specified rules.
+```
+
+**4. Context Integration:**
+- Explicitly reference specific CLAUDE.md sections relevant to the task
+- Include the specific issue/task details
+- Mention any constraints or requirements from CLAUDE.md
+
+**5. Clear Expectations:**
+- Specify that Claude should make actual code changes
+- Request tests and documentation
+- Emphasize following project conventions from CLAUDE.md
+
+**6. GitHub Transparency Requirements:**
+```
+IMPORTANT: After completing your implementation, you MUST post a comment on the GitHub issue/PR explaining:
+- What gaps were identified during your audit
+- What specific changes you made to fill those gaps
+- What testing was performed
+- Any assumptions or decisions made during implementation
+
+Use `gh issue comment <issue_number> --body "..."` or `gh pr comment <pr_number> --body "..."` to post your summary.
+```
+
+---
+
+## 🤖 TARGET PLATFORM: CLAUDE (Code)
+
+- Long-form reasoning supported  
+- Handles layered context well  
+- Responds best to clearly scoped, structured tasks  
+- Avoid ambiguous phrasing or unstated expectations  
+
+---
+
+## 🔁 EXECUTION LOGIC (Automated Flow)
+
+1. Auto-detect task complexity from input.
+2. Apply DETAIL mode logic (self-contained reasoning).
+3. Never ask the user questions. Instead, note assumptions and proceed.
+4. Deliver prompt using the structure below.
+
+---
+EOF
+
+    echo ""
+    echo "## 📋 PROJECT CONTEXT"
+    echo ""
+    echo "**Repository:** ${repo_owner}/${repo_name}"
+    echo ""
+    echo "### Project Guidelines (CLAUDE.md)"
+    echo '```'
+    echo "$claude_context"
+    echo '```'
+    echo ""
+    
+    if [ -n "$project_info" ]; then
+        echo "### GitHub Project Context"
+        echo '```json'
+        echo "$project_info"
+        echo '```'
+        echo ""
+    fi
+    
+    echo ""
+    echo "---"
+    echo ""
+    echo "You are an agent - please keep going until the user's query is completely resolved, before ending"
+    echo "your turn and yielding back to the user. Only terminate your turn when you are sure that the problem"
+    echo "is solved."
+    echo ""
+    echo "If you are not sure about file content or codebase structure pertaining to the user's request, use"
+    echo "your tools to read files and gather the relevant information: do NOT guess or make up an answer."
+    echo ""
+    echo "You MUST plan extensively before each function call, and reflect extensively on the outcomes of the"
+    echo "previous function calls. DO NOT do this entire process by making function calls only, as this can"
+    echo "impair your ability to solve the problem and think insightfully."
+}
+
+# Generate implementation-specific addendum
+generate_implementation_addendum() {
+    local issue_number="$1"
+    local issue_details="$2"
+
+    cat << EOF
+
+---
+
+## 🛠️ IMPLEMENTATION MODE: ISSUE #${issue_number}
+
+### TASK CONTEXT
+${issue_details}
+
+### IMPLEMENTATION REQUIREMENTS
+
+**Role Assignment:** Act as a **senior software engineer** implementing this feature/fix.
+
+**CRITICAL - Status Verification Protocol:**
+Before any implementation work, you MUST audit the current state:
+
+1. **Check for PR Feedback**: If PR feedback is provided below, prioritize addressing those specific concerns
+2. **Verify Claims vs Reality**: The issue claims certain completion levels - these may be inaccurate
+3. **Investigate Actual Implementation**: Check the codebase for actual feature implementation  
+4. **Gap Analysis**: Identify what's actually missing vs what's claimed to be done
+5. **Focus on Gaps**: Only implement what's actually missing, don't duplicate existing work
+6. **Address Review Comments**: If this is updating an existing PR, ensure all review feedback is addressed
+
+**Context Priority:**
+1. Follow all guidelines specified in CLAUDE.md
+2. Maintain existing project patterns and conventions
+3. Use terraform for GCP resource management (if applicable)
+4. Write comprehensive tests following project testing patterns
+5. Ensure backwards compatibility unless explicitly breaking change
+
+**Output Format Required:**
+\`\`\`
+# DECONSTRUCT
+[Analysis of what the issue claims vs what actually needs to be built]
+
+# DIAGNOSE  
+[Status verification: What's claimed vs actual implementation state]
+[PR Feedback Review: If PR feedback exists, list specific concerns to address]
+[Assumptions made about implementation approach, missing details]
+
+# DEVELOP
+[Step-by-step plan prioritizing PR feedback (if any), then focusing on gaps/missing pieces]
+
+# DELIVER
+[Implementation of missing pieces only, tests, and documentation]
+
+# STATUS AUDIT
+- **Claimed Status**: [What the issue claims to be done]
+- **Actual Status**: [What you found in the codebase]
+- **Work Required**: [Specific gaps that need to be filled]
+- **Approach**: [Complete missing pieces vs full reimplementation]
+
+# COMPLETION CHECKLIST
+- [ ] PR feedback addressed (if any) - all review comments resolved
+- [ ] Status verification completed - identified actual vs claimed implementation
+- [ ] Gap analysis performed - focused only on missing pieces
+- [ ] Code implements the missing functionality (not duplicating existing work)
+- [ ] Tests written for new/missing functionality
+- [ ] Documentation updated for changes made
+- [ ] Code follows project conventions from CLAUDE.md
+- [ ] Ready for PR creation/update
+- [ ] GitHub issue comment posted with implementation summary
+
+# MANDATORY: POST IMPLEMENTATION SUMMARY
+After completing your work, you MUST post a comment on issue #${issue_number} using:
+\`\`\`bash
+gh issue comment ${issue_number} --body "🤖 **Implementation Summary**
+
+**Status Audit:**
+- Claimed Status: [what issue claimed]
+- Actual Status: [what you found] 
+- Work Completed: [specific gaps filled]
+
+**Changes Made:**
+- [list specific files/functionality implemented]
+- [testing performed]
+- [any assumptions/decisions made]
+
+**Result:** [Ready for review / Needs additional work / etc.]"
+\`\`\`
+
+# FINAL STEP: CREATE/UPDATE PULL REQUEST
+Create or update the PR with:
+- Clear description of what gaps were filled or feedback addressed
+- Link to issue #${issue_number}
+- Status audit summary (claimed vs actual vs completed)
+- Review feedback resolution notes (if updating existing PR)
+- Testing notes for new functionality only
+- Any breaking changes or migration notes
+\`\`\`
+
+**Critical Instructions:**
+1. **PRIORITIZE PR FEEDBACK** - if review feedback exists, address those concerns first and foremost
+2. **NEVER take issue status claims at face value** - always verify by examining the codebase
+3. **Focus on gaps, not greenfield implementation** - most "incomplete" features are partially done
+4. **Document status discrepancies** - note when claimed status doesn't match reality
+5. **Be surgical in your changes** - only implement what's actually missing or address specific feedback
+6. **AUDIT AND IMPLEMENT IN ONE RUN** - conduct the mandatory status verification and, in the same run, implement every gap you identify. The working tree must end in a fully gap-filled state, complete with tests and docs.
+
+Begin conducting status verification and implementing all identified gaps for issue #${issue_number} using the 4-D methodology.
 EOF
 }
 
-# Main execution function
+# Generate PR review-specific prompt (SIMPLIFIED - direct execution, no meta-prompt)
+generate_review_prompt() {
+    local pr_number="$1"
+    local pr_details="$2"
+    local pr_diff="$3"
+    local claude_context="$4"
+    local repo_owner="$5"
+    local repo_name="$6"
+
+    cat << EOF
+# Senior Code Review - PR #${pr_number}
+
+You are a **senior software engineer** conducting a thorough code review of PR #${pr_number} in ${repo_owner}/${repo_name}.
+
+## 🔄 4-D REVIEW METHODOLOGY
+
+### 1. DECONSTRUCT
+- Analyze what this PR accomplishes and its scope
+- Identify the key changes, files modified, and functionality affected
+- Map the changes to the project's architecture and conventions
+
+### 2. DIAGNOSE  
+- Identify potential issues, risks, or concerns in the changes
+- Check for security vulnerabilities, performance impacts, and maintainability issues
+- Assess adherence to project guidelines and coding standards
+
+### 3. DEVELOP
+- Provide specific, actionable feedback with file names and line numbers
+- Suggest concrete improvements and alternatives
+- Reference project patterns and conventions that should be followed
+
+### 4. DELIVER
+- Make final review decision: APPROVE, REQUEST_CHANGES, or COMMENT
+- Use GitHub CLI to post your review with clear reasoning
+
+---
+
+## 📋 PROJECT CONTEXT
+
+**Repository:** ${repo_owner}/${repo_name}
+
+### Project Guidelines (CLAUDE.md)
+\`\`\`
+${claude_context}
+\`\`\`
+
+---
+
+## 🔍 PR DETAILS
+
+${pr_details}
+
+---
+
+## 📝 CODE CHANGES
+
+\`\`\`diff
+${pr_diff}
+\`\`\`
+
+---
+
+## 📋 REVIEW REQUIREMENTS
+
+Conduct a thorough technical review focusing on:
+
+1. **Code Quality**: Does it follow project conventions from CLAUDE.md?
+2. **Security**: Any potential vulnerabilities or security risks?
+3. **Performance**: Will this impact system performance negatively?
+4. **Architecture**: Is it consistent with existing patterns and design?
+5. **Testing**: Are there adequate tests for the changes?
+6. **Documentation**: Is documentation updated appropriately?
+
+## 🎯 OUTPUT FORMAT
+
+Provide your review in this exact format:
+
+\`\`\`
+# DECONSTRUCT
+[What this PR does and its scope - 2-3 sentences]
+
+# DIAGNOSE
+[Issues found, concerns, or areas that need attention]
+
+# DEVELOP
+[Specific feedback with actionable suggestions]
+
+# DELIVER
+
+## Code Review Summary
+[Brief explanation of your overall assessment]
+
+## Issues Found
+- **[filename:line]**: [specific issue and how to fix it]
+- **[filename:function]**: [pattern/convention issue and correct approach]
+- **[general]**: [broader concerns and recommendations]
+
+## Recommendations
+- [Actionable steps the author should take]
+- [Best practices to follow based on CLAUDE.md]
+
+## Positive Aspects
+- [Things done well in this PR, if any]
+
+\`\`\`
+
+## 🚀 FINAL INSTRUCTION
+
+After completing your analysis above, you MUST use the GitHub CLI to post a comment on the PR:
+
+**Always use:**
+\`gh pr comment ${pr_number} --body "YOUR_DETAILED_REVIEW_HERE"\`
+
+**Format your comment with clear sections:**
+- **Summary**: Brief overview of your assessment
+- **Issues Found**: Specific problems with file:line references
+- **Recommendations**: Actionable next steps for the author
+- **Positive Notes**: What was done well (if applicable)
+
+**Be specific and actionable** - engineers need to know exactly what to fix and how to fix it. Include file names, function names, line numbers, and specific code examples when possible.
+
+Begin your review now.
+
+---
+
+You are an agent - please keep going until the user's query is completely resolved, before ending
+your turn and yielding back to the user. Only terminate your turn when you are sure that the problem
+is solved.
+
+If you are not sure about file content or codebase structure pertaining to the user's request, use
+your tools to read files and gather the relevant information: do NOT guess or make up an answer.
+
+You MUST plan extensively before each function call, and reflect extensively on the outcomes of the
+previous function calls. DO NOT do this entire process by making function calls only, as this can
+impair your ability to solve the problem and think insightfully.
+EOF
+}
+
+# Generate bug analysis prompt for creating detailed bug reports
+generate_bug_analysis_prompt() {
+    local bug_description="$1"
+    local claude_context="$2"
+    local repo_owner="$3"
+    local repo_name="$4"
+
+    cat << EOF
+# Bug Analysis and GitHub Issue Creation
+
+You are a senior software engineer analyzing a bug report to create a comprehensive GitHub issue. Your role is to:
+1. Analyze the provided bug description
+2. Search the codebase for likely causes and related code
+3. Generate a detailed, structured bug report for GitHub
+
+## Project Context
+Repository: ${repo_owner}/${repo_name}
+
+${claude_context}
+
+## Reported Bug Description
+"${bug_description}"
+
+## Your Analysis Tasks
+
+### 1. INVESTIGATE THE CODEBASE
+- Search for relevant files, functions, and code patterns related to the bug description
+- Identify potential areas where this bug could be occurring
+- Look for error handling, validation, API endpoints, UI components, etc. that match the description
+- Examine recent commits, configuration files, and dependencies if relevant
+
+### 2. ANALYZE POTENTIAL CAUSES
+- Based on your codebase investigation, identify likely causes
+- Consider common bug patterns: validation issues, race conditions, configuration problems, API failures, etc.
+- Look for similar existing issues or TODO comments in the code
+- Identify the severity and priority of the bug
+
+### 3. CREATE COMPREHENSIVE BUG REPORT
+Format your analysis into a structured GitHub issue using this template:
+
+\`\`\`
+# Bug Report: [Descriptive Title Based on Analysis]
+
+## 🐛 Description
+[Clear description of the bug based on the original report and your analysis]
+
+## 🔍 Analysis Results
+**Likely Location**: [Files/functions where bug probably occurs based on codebase analysis]
+**Potential Causes**: [Technical analysis of what might be causing this]
+**Severity**: [Critical/Major/Minor based on analysis]
+**Priority**: [High/Medium/Low based on impact assessment]
+
+## 📋 Steps to Reproduce
+[If you can infer steps from the description and codebase analysis, provide them. Otherwise note "To be determined"]
+
+## 🎯 Expected Behavior
+[What should happen instead]
+
+## 📱 Environment Details
+[If mentioned in description or inferable from codebase, include relevant environment info]
+
+## 🔧 Technical Investigation
+**Relevant Code Areas**:
+- \`path/to/file.ext:line_number\` - [Brief description of relevance]
+- \`another/file.ext:function_name\` - [Why this might be related]
+
+**Potential Root Causes**:
+1. [Most likely cause based on code analysis]
+2. [Second most likely cause]
+3. [Other possibilities]
+
+## 🧪 Suggested Investigation Steps
+1. [Specific debugging steps for developers]
+2. [Areas to check first]
+3. [Tools or methods to verify the issue]
+
+## 💡 Possible Solutions
+[If you can identify potential fixes based on the codebase]
+
+## 📎 Additional Context
+[Any other relevant information from your codebase analysis]
+
+## 🏷️ Labels
+[Suggest appropriate labels: bug, priority-high/medium/low, area-frontend/backend/api, etc.]
+\`\`\`
+
+## 🚀 FINAL INSTRUCTION
+
+After completing your analysis, create the GitHub issue using:
+\`gh issue create --title "Bug: [Your descriptive title]" --body "YOUR_DETAILED_BUG_REPORT_HERE" --label "bug"\`
+
+Additional labels to consider based on your analysis:
+- \`priority-high\`, \`priority-medium\`, \`priority-low\`
+- \`severity-critical\`, \`severity-major\`, \`severity-minor\`
+- \`area-frontend\`, \`area-backend\`, \`area-api\`, \`area-ui\`, etc.
+- \`investigation-needed\` if more details are required
+
+**Important**: 
+- Be thorough but factual - only include what you can reasonably infer from the description and codebase
+- If information is missing, clearly state "To be determined" rather than guessing
+- Focus on actionable technical details that will help developers investigate and fix the issue
+- Include specific file paths and line numbers when you find relevant code
+
+Begin your analysis now.
+
+---
+
+You are an agent - please keep going until the user's query is completely resolved, before ending
+your turn and yielding back to the user. Only terminate your turn when you are sure that the problem
+is solved.
+
+If you are not sure about file content or codebase structure pertaining to the user's request, use
+your tools to read files and gather the relevant information: do NOT guess or make up an answer.
+
+You MUST plan extensively before each function call, and reflect extensively on the outcomes of the
+previous function calls. DO NOT do this entire process by making function calls only, as this can
+impair your ability to solve the problem and think insightfully.
+EOF
+}
+
+# Generate direct implementation prompt for addressing PR feedback (no meta-prompt)
+generate_pr_feedback_implementation_prompt() {
+    local issue_number="$1"
+    local issue_details="$2"
+    local pr_feedback="$3"
+    local claude_context="$4"
+    local repo_owner="$5"
+    local repo_name="$6"
+
+    cat << EOF
+# Address PR Feedback - Issue #${issue_number}
+
+You are a senior software engineer addressing specific PR review feedback. Your task is to make the necessary code changes to address all review comments and push the updates to the current branch.
+
+## Repository Context
+Repository: ${repo_owner}/${repo_name}
+
+${claude_context}
+
+## Original Issue Context
+${issue_details}
+
+${pr_feedback}
+
+## Your Task
+
+You must address ALL the feedback above by making the necessary code changes. This is not about analysis or planning - you need to:
+
+1. **Review each piece of feedback** and understand what changes are requested
+2. **Make the specific code changes** to address each concern
+3. **Ensure code quality** - fix any bugs, improve implementation, add tests if needed
+4. **Follow project conventions** as specified in CLAUDE.md
+5. **Commit and push changes** to the current branch
+
+## Critical Requirements
+
+- Address EVERY piece of feedback provided above
+- Make actual code changes, don't just acknowledge the feedback
+- Test your changes to ensure they work
+- Follow the existing code patterns and conventions
+- Write clear commit messages describing what feedback was addressed
+- Push changes to the current branch so PR can be re-reviewed
+
+## Expected Workflow
+
+1. Read through all the PR feedback carefully
+2. Identify the specific files and changes needed
+3. Make the necessary code modifications
+4. Test your changes (run relevant tests if they exist)
+5. Commit with descriptive messages
+6. Push to the current branch
+
+Begin addressing the PR feedback now. Make the actual code changes required.
+
+---
+
+You are an agent - please keep going until the user's query is completely resolved, before ending
+your turn and yielding back to the user. Only terminate your turn when you are sure that the problem
+is solved.
+
+If you are not sure about file content or codebase structure pertaining to the user's request, use
+your tools to read files and gather the relevant information: do NOT guess or make up an answer.
+
+You MUST plan extensively before each function call, and reflect extensively on the outcomes of the
+previous function calls. DO NOT do this entire process by making function calls only, as this can
+impair your ability to solve the problem and think insightfully.
+EOF
+}
+
+# Fetch PR review comments and feedback for addressing in subsequent implementations
+get_pr_feedback() {
+    local pr_number="$1"
+    
+    if [ -z "$pr_number" ]; then
+        echo ""
+        return
+    fi
+    
+    log_info "Fetching PR #${pr_number} review feedback..." >&2
+    
+    # Fetch PR reviews and comments
+    local pr_reviews
+    pr_reviews=$(gh pr view "$pr_number" --repo "${REPO_OWNER}/${REPO_NAME}" --json reviews,comments --jq '.reviews[] | select(.state == "CHANGES_REQUESTED" or .state == "COMMENTED") | {author: .author.login, state: .state, body: .body, submittedAt: .submittedAt}' 2>/dev/null || echo "")
+    
+    local pr_comments
+    pr_comments=$(gh pr view "$pr_number" --repo "${REPO_OWNER}/${REPO_NAME}" --json comments --jq '.comments[] | {author: .author.login, body: .body, createdAt: .createdAt}' 2>/dev/null || echo "")
+    
+    # Get review comments (line-specific comments)
+    local review_comments
+    review_comments=$(gh api "repos/${REPO_OWNER}/${REPO_NAME}/pulls/${pr_number}/comments" --jq '.[] | {author: .user.login, body: .body, path: .path, line: .line, createdAt: .created_at}' 2>/dev/null || echo "")
+    
+    # Debug logging
+    log_info "PR reviews found: ${#pr_reviews} chars" >&2
+    log_info "PR comments found: ${#pr_comments} chars" >&2
+    log_info "Review comments found: ${#review_comments} chars" >&2
+    
+    # Combine all feedback if any exists
+    if [ -n "$pr_reviews" ] || [ -n "$pr_comments" ] || [ -n "$review_comments" ]; then
+        log_success "Found PR review feedback to address" >&2
+        
+        cat << EOF
+
+## 🔄 EXISTING PR FEEDBACK TO ADDRESS
+
+**PR #${pr_number} Review Feedback:**
+
+### General Reviews:
+${pr_reviews}
+
+### Discussion Comments:
+${pr_comments}
+
+### Code Review Comments:
+${review_comments}
+
+**CRITICAL**: The above feedback must be addressed in your implementation. This is not a greenfield implementation - you are updating an existing PR to address specific review concerns.
+
+EOF
+    else
+        log_info "No review feedback found for PR #${pr_number}" >&2
+        echo ""
+    fi
+}
+
+# Smart branch management: reuse existing PR branches or create new ones
+smart_branch_setup() {
+    local number="$1"
+    local task_type="$2"
+    
+    log_info "=== SMART BRANCH SETUP FOR ${task_type} #${number} ==="
+    
+    # Check for existing open PRs for this issue
+    log_info "Checking for existing open PRs for issue #${number}..."
+    local existing_prs
+    existing_prs=$(gh pr list --repo "${REPO_OWNER}/${REPO_NAME}" --search "closes:#${number} OR fixes:#${number} OR issue #${number}" --state open --json number,title,headRefName 2>/dev/null || echo "[]")
+    
+    if [ "$existing_prs" != "[]" ] && [ -n "$existing_prs" ]; then
+        # Found existing PR(s) - use the first one
+        local existing_branch
+        existing_branch=$(echo "$existing_prs" | jq -r '.[0].headRefName' 2>/dev/null)
+        local existing_pr_number
+        existing_pr_number=$(echo "$existing_prs" | jq -r '.[0].number' 2>/dev/null)
+        
+        if [ -n "$existing_branch" ] && [ "$existing_branch" != "null" ]; then
+            log_success "FOUND EXISTING OPEN PR #${existing_pr_number} with branch: ${existing_branch}"
+            log_info "REUSING existing branch instead of creating new one..."
+            
+            # Fetch the branch from remote
+            log_info "Fetching existing branch from remote..."
+            git fetch origin "$existing_branch" || {
+                log_warning "Could not fetch branch ${existing_branch}, will create new one"
+                return 1
+            }
+            
+            # Checkout the existing branch
+            if git checkout "$existing_branch" >/dev/null 2>&1; then
+                log_success "Switched to existing branch: ${existing_branch}" >&2
+                
+                # Pull latest changes
+                log_info "Pulling latest changes from origin/${existing_branch}..." >&2
+                git pull origin "$existing_branch" >/dev/null 2>&1 || {
+                    log_warning "Could not pull latest changes, continuing anyway" >&2
+                }
+                
+                echo "${existing_branch}|${existing_pr_number}"  # Return branch name and PR number
+                return 0
+            else
+                log_warning "Could not checkout existing branch ${existing_branch}, will create new one"
+                return 1
+            fi
+        else
+            log_warning "Could not extract branch name from existing PR, will create new one"
+            return 1
+        fi
+    else
+        log_info "No existing open PRs found for issue #${number}"
+        return 1  # Signal to create new branch
+    fi
+}
+
+# Review a PR using Claude
+review_pr() {
+    local pr_number="$1"
+    local claude_context="$2"
+    local repo_owner="$3"
+    local repo_name="$4"
+    
+    log_info "🔍 Starting automated review of PR #${pr_number}..."
+    
+    # Fetch PR details
+    log_info "Fetching PR #${pr_number} details..."
+    local pr_details
+    pr_details=$(gh pr view "$pr_number" --repo "${repo_owner}/${repo_name}" --json title,body,headRefName,baseRefName,author,additions,deletions,changedFiles,commits,reviewDecision,mergeable,url 2>/dev/null || {
+        log_error "Could not fetch PR #${pr_number}. Please check the PR number and your GitHub access."
+        return 1
+    })
+
+    # Fetch PR diff
+    log_info "Fetching PR diff..."
+    local pr_diff
+    pr_diff=$(gh pr diff "$pr_number" --repo "${repo_owner}/${repo_name}" 2>/dev/null || {
+        log_error "Could not fetch PR diff for #${pr_number}"
+        return 1
+    })
+    
+    # Generate review prompt
+    log_info "Generating direct review prompt (single-stage)..."
+    local final_prompt
+    final_prompt=$(generate_review_prompt "$pr_number" "$pr_details" "$pr_diff" "$claude_context" "$repo_owner" "$repo_name")
+    
+    if [ -z "$final_prompt" ]; then
+        log_error "Failed to generate review prompt for PR #${pr_number}"
+        return 1
+    fi
+    
+    # Execute Claude for PR review
+    local output_file="/tmp/pr-${pr_number}-review-output.md"
+    
+    if [ "$INTERACTIVE" = true ]; then
+        log_info "Direct Claude execution in INTERACTIVE mode for PR review #${pr_number}..."
+    else
+        log_info "Direct Claude execution in HEADLESS mode for PR review #${pr_number}..."
+    fi
+    
+    # Log PR review prompt size before sending to Claude
+    log_info "Sending PR review prompt to Claude (${#final_prompt} bytes)"
+    
+    local run_mode=$([[ $INTERACTIVE == true ]] && echo "interactive" || echo "headless")
+    if ! run_claude "$final_prompt" "$output_file" "$run_mode"; then
+        log_error "Claude execution failed for PR review #${pr_number}"
+        return 1
+    fi
+    
+    log_success "Claude execution completed for PR review #${pr_number}"
+    
+    # Log final output file details before processing
+    if [ -f "$output_file" ]; then
+        local final_output_size=$(wc -c < "$output_file" 2>/dev/null || echo "0")
+        log_info "Final Claude review output file: $output_file (${final_output_size} bytes)"
+        if [ "$final_output_size" -eq 0 ]; then
+            log_warning "Claude review output file is empty - review may have failed"
+        fi
+    else
+        log_error "Claude review output file does not exist: $output_file"
+        return 1
+    fi
+    
+    # Claude should have posted the review comment directly via 'gh pr comment'
+    log_success "PR review completed - Claude should have posted comment via 'gh pr comment' command"
+    
+    # Check if Claude made any unauthorized changes (shouldn't happen)
+    if ! git diff --quiet; then
+        log_warning "Claude made unexpected changes during PR review - discarding..."
+        git reset --hard
+    fi
+    
+    log_success "Completed automated review for PR #${pr_number}"
+    return 0
+}
+
+# Process a single task (issue or PR) with full automation
+process_single_task() {
+    local number="$1"
+    local mode="$2"
+    local project_info="$3"
+    local claude_context="$4"
+    local is_range_mode="$5"
+    local auto_pr_review="$6"
+    
+    local task_type
+    if [ "$mode" = "implement" ]; then
+        task_type="issue"
+        log_range "Processing issue #${number}..."
+    else
+        task_type="pr"
+        log_range "Processing PR #${number}..."
+    fi
+
+    # Early exit for prompt-only mode to avoid workspace side-effects
+    if [ "$PROMPT_ONLY" = true ]; then
+        log_info "Prompt-only mode: skipping workspace changes..."
+        
+        # Generate base Lyra-Dev prompt
+        log_info "Generating Lyra-Dev base prompt..."
+        local base_prompt
+        base_prompt=$(generate_base_lyra_prompt "$REPO_OWNER" "$REPO_NAME" "$claude_context" "$project_info")
+
+        # Generate mode-specific prompt for preview
+        local final_prompt
+        if [ "$mode" = "implement" ]; then
+            log_info "Fetching issue #${number} details..."
+            local issue_details
+            issue_details=$(gh issue view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body,labels,assignees,milestone,url,comments 2>/dev/null || {
+                log_error "Could not fetch issue #${number}. Please check the issue number and your GitHub access."
+                return 1
+            })
+            
+            log_info "Adding implementation-specific instructions..."
+            local implementation_addendum
+            implementation_addendum=$(generate_implementation_addendum "$number" "$issue_details")
+            final_prompt="${base_prompt}${implementation_addendum}"
+            
+            # Show two-stage prompt generation for implementation
+            echo ""
+            echo "==================== STAGE 1: META-PROMPT ===================="
+            echo "$final_prompt"
+            echo ""
+            echo "==================== STAGE 2: OPTIMIZED PROMPT ===================="
+            
+            # Generate optimized prompt using stage 1
+            local builder_json="/tmp/${task_type}-${number}-builder-preview.json"
+            local builder_txt="/tmp/${task_type}-${number}-prompt-preview.txt"
+            
+            log_info "Running prompt-builder to show optimized output..."
+            if build_prompt_with_llm "$final_prompt" "$builder_json" "$builder_txt"; then
+                cat "$builder_txt"
+                rm -f "$builder_json" "$builder_txt"
+            else
+                echo "[ERROR: Could not generate optimized prompt – see $builder_json for details]"
+            fi
+            echo ""
+            echo "====================== PROMPT PREVIEW END ========================"
+        else
+            # PR Review: Direct prompt (single-stage)
+            log_info "Fetching PR #${number} details..."
+            local pr_details
+            pr_details=$(gh pr view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body,headRefName,baseRefName,author,additions,deletions,changedFiles,commits,reviewDecision,mergeable,url 2>/dev/null || {
+                log_error "Could not fetch PR #${number}. Please check the PR number and your GitHub access."
+                return 1
+            })
+
+            log_info "Fetching PR diff..."
+            local pr_diff
+            pr_diff=$(gh pr diff "$number" --repo "${REPO_OWNER}/${REPO_NAME}" 2>/dev/null || {
+                log_error "Could not fetch PR diff for #${number}"
+                return 1
+            })
+            
+            log_info "Generating direct review prompt..."
+            final_prompt=$(generate_review_prompt "$number" "$pr_details" "$pr_diff" "$claude_context" "$REPO_OWNER" "$REPO_NAME")
+            
+            # Show single-stage prompt for PR review
+            echo ""
+            echo "==================== DIRECT PR REVIEW PROMPT ===================="
+            echo "$final_prompt"
+            echo ""
+            echo "====================== PROMPT PREVIEW END ========================"
+        fi
+        echo ""
+        return 0
+    fi
+
+    # Full automation mode - workspace hygiene first
+    workspace_hygiene
+
+    # Smart branch management: only for implementation mode
+    local branch_name
+    local existing_pr_number=""
+    if [ "$mode" = "implement" ]; then
+        log_info "Setting up branch for ${task_type} #${number}..."
+        
+        # Try to reuse existing branch first
+        local branch_setup_result
+        if branch_setup_result=$(smart_branch_setup "$number" "$task_type"); then
+            # Parse the result: branch_name|pr_number or just branch_name
+            if [[ "$branch_setup_result" == *"|"* ]]; then
+                branch_name="${branch_setup_result%|*}"
+                existing_pr_number="${branch_setup_result#*|}"
+                log_success "Reusing existing branch: ${branch_name} (PR #${existing_pr_number})"
+            else
+                branch_name="$branch_setup_result"
+                log_success "Reusing existing branch: ${branch_name}"
+            fi
+        else
+            # No existing PR found, create new timestamped branch
+            log_info "No existing PR found, creating new timestamped branch..."
+            if ! branch_name=$(create_branch "$number" "$task_type"); then
+                log_error "Failed to create branch for ${task_type} #${number}, skipping..."
+                return 1
+            fi
+            log_success "Created new branch: ${branch_name}"
+        fi
+    else
+        # Review mode: stay on main branch for read-only analysis
+        log_info "PR review mode: staying on main branch (read-only analysis)"
+        branch_name="main"
+    fi
+
+    # Generate base Lyra-Dev prompt
+    log_info "Generating Lyra-Dev base prompt..."
+    local base_prompt
+    base_prompt=$(generate_base_lyra_prompt "$REPO_OWNER" "$REPO_NAME" "$claude_context" "$project_info")
+
+    # Generate mode-specific prompt
+    local final_prompt
+    if [ "$mode" = "implement" ]; then
+        log_info "Fetching issue #${number} details..."
+        local issue_details
+        issue_details=$(gh issue view "$number" --repo "${REPO_OWNER}/${REPO_NAME}" --json title,body,labels,assignees,milestone,url,comments 2>/dev/null || {
+            log_error "Could not fetch issue #${number}. Please check the issue number and your GitHub access."
+            return 1
+        })
+        
+        # Fetch PR feedback if working on existing PR
+        local pr_feedback=""
+        if [ -n "$existing_pr_number" ]; then
+            log_info "Fetching PR feedback for existing PR #${existing_pr_number}..."
+            pr_feedback=$(get_pr_feedback "$existing_pr_number")
+            if [ -n "$pr_feedback" ]; then
+                log_success "PR feedback retrieved (${#pr_feedback} characters)"
+            else
+                log_info "No PR feedback found"
+            fi
+        fi
+        
+        # Generate appropriate prompt based on whether we have PR feedback
+        if [ -n "$existing_pr_number" ] && [ -n "$pr_feedback" ]; then
+            # Direct implementation prompt for PR feedback addressing
+            log_info "Generating direct PR feedback implementation prompt..."
+            final_prompt=$(generate_pr_feedback_implementation_prompt "$number" "$issue_details" "$pr_feedback" "$claude_context" "$REPO_OWNER" "$REPO_NAME")
+            log_info "Direct prompt generated (${#final_prompt} chars)"
+        else
+            # Standard Lyra-Dev meta-prompt for new implementations
+            log_info "Adding implementation-specific instructions..."
+            local implementation_addendum
+            implementation_addendum=$(generate_implementation_addendum "$number" "$issue_details")
+            final_prompt="${base_prompt}${implementation_addendum}${pr_feedback}"
+            log_info "Prompt composition: base=${#base_prompt} + addendum=${#implementation_addendum} + feedback=${#pr_feedback} = ${#final_prompt} total chars"
+        fi
+    else
+        # PR Review: Use new review_pr function
+        review_pr "$number" "$claude_context" "$REPO_OWNER" "$REPO_NAME"
+        return $?
+    fi
+
+    # Check if prompt generation succeeded
+    if [ -z "$final_prompt" ]; then
+        log_error "Failed to generate prompt for ${task_type} #${number}, skipping..."
+        return 1
+    fi
+
+    # Execute Claude based on mode
+    local output_file="/tmp/${task_type}-${number}-output.md"
+    
+    if [ "$mode" = "implement" ]; then
+        # Check if we have PR feedback - if so, use direct execution, otherwise use two-stage
+        if [ -n "$existing_pr_number" ] && [ -n "$pr_feedback" ]; then
+            # PR feedback exists: Direct execution (like PR review mode)
+            log_info "PR feedback detected - using DIRECT EXECUTION mode for ${task_type} #${number}..."
+            if [ "$INTERACTIVE" = true ]; then
+                log_info "Direct Claude execution in INTERACTIVE mode for ${task_type} #${number}..."
+            else
+                log_info "Direct Claude execution in HEADLESS mode for ${task_type} #${number}..."
+            fi
+            
+            # Log direct prompt size before sending to Claude
+            log_info "Sending direct prompt to Claude (${#final_prompt} bytes)"
+            
+            local run_mode=$([[ $INTERACTIVE == true ]] && echo "interactive" || echo "headless")
+            if ! run_claude "$final_prompt" "$output_file" "$run_mode"; then
+                log_error "Direct Claude execution failed for ${task_type} #${number}"
+                return 1
+            fi
+        else
+            # No PR feedback: Use standard two-stage execution with Gemini
+            log_info "No PR feedback - using TWO-STAGE EXECUTION mode for ${task_type} #${number}..."
+            local builder_json="/tmp/${task_type}-${number}-builder.json"
+            local builder_txt="/tmp/${task_type}-${number}-prompt.txt"
+            
+            # Stage 1: Prompt-builder (generates optimized prompt)
+            log_info "Stage 1: building optimized prompt for ${task_type} #${number}..."
+            if ! build_prompt_with_llm "$final_prompt" "$builder_json" "$builder_txt"; then
+                log_error "Prompt builder failed for ${task_type} #${number} – see $builder_json for details"
+                return 1
+            fi
+            log_success "Optimized prompt captured"
+
+            # Stage 2: Executor Claude (audit and implement)
+            if [ "$INTERACTIVE" = true ]; then
+                log_info "Stage 2: executor Claude in INTERACTIVE mode for ${task_type} #${number}..."
+            else
+                log_info "Stage 2: executor Claude in HEADLESS mode for ${task_type} #${number}..."
+            fi
+            
+            # Log optimized prompt size before sending to Claude
+            local optimized_prompt_size=$(wc -c < "$builder_txt" 2>/dev/null || echo "0")
+            log_info "Sending optimized prompt to Claude (${optimized_prompt_size} bytes)"
+            
+            local run_mode=$([[ $INTERACTIVE == true ]] && echo "interactive" || echo "headless")
+            if ! run_claude "$(cat "$builder_txt")" "$output_file" "$run_mode"; then
+                log_error "Executor Claude failed for ${task_type} #${number}"
+                return 1
+            fi
+
+            # Verify we got actual audit results, not another meta-prompt
+            if grep -q 'OPTIMIZED PROMPT FOR CLAUDE\|# Lyra-Dev:' "$output_file"; then
+                log_error "Executor returned another meta-prompt – check addendum wording"
+                return 1
+            fi
+
+            # Clean up intermediate files
+            rm -f "$builder_json" "$builder_txt"
+        fi
+    else
+        # PR Review: Single-stage direct execution
+        if [ "$INTERACTIVE" = true ]; then
+            log_info "Direct Claude execution in INTERACTIVE mode for PR review #${number}..."
+        else
+            log_info "Direct Claude execution in HEADLESS mode for PR review #${number}..."
+        fi
+        
+        # Log PR review prompt size before sending to Claude
+        log_info "Sending PR review prompt to Claude (${#final_prompt} bytes)"
+        
+        local run_mode=$([[ $INTERACTIVE == true ]] && echo "interactive" || echo "headless")
+        if ! run_claude "$final_prompt" "$output_file" "$run_mode"; then
+            log_error "Claude execution failed for PR review #${number}"
+            return 1
+        fi
+    fi
+
+    log_success "Claude execution completed for ${task_type} #${number}"
+    
+    # Log final output file details before processing
+    if [ -f "$output_file" ]; then
+        local final_output_size=$(wc -c < "$output_file" 2>/dev/null || echo "0")
+        log_info "Final Claude output file: $output_file (${final_output_size} bytes)"
+        if [ "$final_output_size" -eq 0 ]; then
+            log_warning "Claude output file is empty - comments will be truncated"
+        fi
+    else
+        log_error "Claude output file does not exist: $output_file"
+    fi
+
+    # Handle comments and results based on mode
+    if [ "$mode" = "implement" ]; then
+        # Implementation mode: post audit comment on issue
+        issue_comment "$number" "$output_file" "$mode"
+        
+        # Check for changes and create PRs
+        if git diff --quiet; then
+            log_success "Audit found no code changes needed – issue appears complete"
+            # Optional: auto-close the issue if it appears complete
+            maybe_close_issue "$number" "$output_file"
+            return 0
+        fi
+
+        log_info "Code changes detected, proceeding with commit and PR creation..."
+
+        # Always commit and push changes (we know changes exist at this point)
+        if ! commit_and_push "$branch_name" "$number" "$mode"; then
+            log_error "Failed to commit/push changes for ${task_type} #${number}"
+            return 1
+        fi
+
+        # Create PR only if commits exist (we know they do since we detected changes)
+        if ! git diff --quiet main...HEAD; then
+            local created_pr_number
+            created_pr_number=$(ensure_pr "$number" "$branch_name" "$mode" "$output_file")
+            local ensure_pr_result=$?
+            
+            if [ $ensure_pr_result -ne 0 ]; then
+                log_error "Failed to create/update PR for ${task_type} #${number}"
+                return 1
+            fi
+            
+            # Auto-review the created/updated PR if flag is set
+            if [ "$auto_pr_review" = true ] && [ -n "$created_pr_number" ] && [ "$created_pr_number" != "" ]; then
+                log_info "🤖 Auto-reviewing created/updated PR #${created_pr_number}..."
+                if ! review_pr "$created_pr_number" "$claude_context" "$REPO_OWNER" "$REPO_NAME"; then
+                    log_warning "Auto-review failed for PR #${created_pr_number}, but issue implementation was successful"
+                    # Don't return error - issue implementation succeeded, review failure is not critical
+                fi
+            fi
+        else
+            log_info "No commits found relative to main → PR not needed"
+        fi
+    fi
+
+    log_success "Completed full automation workflow for ${task_type} #${number}"
+    return 0
+}
+
+# Main execution
 main() {
+    # Check if no arguments provided
     if [ $# -eq 0 ]; then
         show_usage
         exit 1
     fi
 
+    # Parse arguments
     parse_arguments "$@"
 
-    log_info "🤖 Enhanced Claude Task Runner with Agent Coordination"
-    log_info "Mode: $MODE | Interactive: $INTERACTIVE | Prompt Only: $PROMPT_ONLY"
-
+    # Check dependencies
+    log_info "Checking dependencies..."
     check_dependencies "$PROMPT_ONLY"
-    validate_environment
-    get_repo_info
 
-    # Test Claude CLI if not in prompt-only mode
+    # Validate environment
+    log_info "Validating environment..."
+    validate_environment
+    
+    # Quick test of Claude CLI
     if [ "$PROMPT_ONLY" != "true" ]; then
-        log_info "Testing Claude CLI and agent availability..."
+        log_info "Testing Claude CLI..."
         local test_output
-        test_output=$(echo "Say 'Agent coordination ready' and list available agents using /agents" | claude -p --dangerously-skip-permissions 2>&1)
-        if [[ "$test_output" == *"ready"* ]] || [[ "$test_output" == *"agent"* ]]; then
-            log_success "Claude CLI and agents are ready"
+        test_output=$(echo "Say 'test ok' and nothing else" | claude -p --model sonnet --dangerously-skip-permissions --output-format json 2>&1)
+        local test_exit=$?
+        
+        if [ $test_exit -ne 0 ]; then
+            log_error "Claude CLI test failed with exit code $test_exit"
+            log_error "Output: $test_output"
+            log_error "Please check your Claude CLI installation and authentication"
+            exit 1
+        fi
+        
+        if [[ "$test_output" == *"test ok"* ]] || [[ "$test_output" == *"result"* ]]; then
+            log_success "Claude CLI test passed"
         else
-            log_warning "Claude CLI test returned: ${test_output:0:100}..."
+            log_warning "Claude CLI test returned unexpected output: ${test_output:0:100}..."
         fi
     fi
 
-    # Get project context
-    local project_info=""
-    if [ -n "$PROJECT_ID" ]; then
-        project_info=$(gh project view "$PROJECT_ID" --owner "$REPO_OWNER" --format json 2>/dev/null || echo "")
-    fi
-    
+    # Get repository information
+    log_info "Extracting repository information..."
+    get_repo_info
+
+    # Get project information if specified
+    local project_info
+    project_info=$(get_project_info "$PROJECT_ID")
+
+    # Get CLAUDE.md context
     local claude_context
-    claude_context=$(cat CLAUDE.md)
+    claude_context=$(get_claude_context)
 
-    # Handle different modes
-    case "$MODE" in
-        "implement")
-            local numbers_to_process
-            numbers_to_process=$(parse_range "$ISSUE_RANGE")
-            local is_range_mode=false
-            
-            if [[ $ISSUE_RANGE =~ - ]]; then
-                is_range_mode=true
-                log_range "🔨 Processing issue range: $ISSUE_RANGE with agent coordination"
-            fi
-            
-            local total_count=0
-            local success_count=0
-            
-            while IFS= read -r number; do
-                total_count=$((total_count + 1))
-                
-                if [ $total_count -gt 1 ] && [ "$is_range_mode" = true ]; then
-                    log_range "Waiting ${TIMEOUT_SECONDS} seconds before next task..."
-                    sleep "$TIMEOUT_SECONDS"
-                fi
-                
-                echo ""
-                echo "========================================"
-                echo "🤖 AGENT TASK $total_count: ISSUE #$number"
-                echo "========================================"
-                
-                if process_single_task "$number" "$MODE" "$project_info" "$claude_context" "$is_range_mode" "$AUTO_PR_REVIEW"; then
-                    success_count=$((success_count + 1))
-                fi
-                
-            done <<< "$numbers_to_process"
-            
-            echo ""
-            log_success "Agent coordination complete: $success_count/$total_count tasks successful"
-            ;;
-            
-        "review")
-            local numbers_to_process
-            numbers_to_process=$(parse_range "$PR_RANGE")
-            
-            while IFS= read -r number; do
-                echo ""
-                echo "========================================"
-                echo "🔍 AGENT REVIEW: PR #$number"
-                echo "========================================"
-                
-                process_single_task "$number" "$MODE" "$project_info" "$claude_context" false false
-                
-            done <<< "$numbers_to_process"
-            ;;
-            
-        "bug")
+    # Handle bug report mode separately
+    if [ "$MODE" = "bug" ]; then
+        log_info "Processing bug report: \"$BUG_DESCRIPTION\""
+        
+        # Generate bug analysis prompt
+        log_info "Generating bug analysis prompt..."
+        local bug_prompt
+        bug_prompt=$(generate_bug_analysis_prompt "$BUG_DESCRIPTION" "$claude_context" "$REPO_OWNER" "$REPO_NAME")
+        
+        if [ "$PROMPT_ONLY" = true ]; then
+            echo "========================================"
+            echo "BUG ANALYSIS PROMPT"
+            echo "========================================"
+            echo "$bug_prompt"
             echo ""
             echo "========================================"
-            echo "🐛 AGENT BUG ANALYSIS"
-            echo "========================================"
-            
-            if [ "$PROMPT_ONLY" = true ]; then
-                log_info "Generating bug analysis prompt..."
-                local target_agent="github-bug-hunter"
-                generate_agent_targeted_lyra_prompt "$target_agent" "new" "$BUG_DESCRIPTION" "$claude_context" ""
-            else
-                local bug_prompt="Use the github-bug-hunter agent to analyze this bug and create a comprehensive GitHub issue:
+            log_info "Use without --prompt-only to execute this prompt with Claude Code"
+            exit 0
+        fi
+        
+        # Execute Claude with bug analysis prompt
+        log_info "Running Claude Code for bug analysis..."
+        
+        if [ "$INTERACTIVE" = true ]; then
+            echo "$bug_prompt" | claude
+        else
+            echo "$bug_prompt" | claude -p
+        fi
+        
+        if [ $? -eq 0 ]; then
+            log_success "Bug analysis and GitHub issue creation completed"
+            log_info "Check GitHub for the newly created bug report issue"
+        else
+            log_error "Bug analysis failed"
+            exit 1
+        fi
+        
+        exit 0
+    fi
 
-Bug Description: \"$BUG_DESCRIPTION\"
+    # Determine what we're processing
+    local numbers_to_process
+    local is_range_mode=false
+    
+    if [ "$MODE" = "implement" ]; then
+        numbers_to_process=$(parse_range "$ISSUE_RANGE")
+        if [[ $ISSUE_RANGE =~ - ]]; then
+            is_range_mode=true
+            log_range "Processing issue range: $ISSUE_RANGE (timeout: ${TIMEOUT_SECONDS}s between tasks)"
+        else
+            log_info "Processing single issue: $ISSUE_RANGE"
+        fi
+    else
+        numbers_to_process=$(parse_range "$PR_RANGE")
+        if [[ $PR_RANGE =~ - ]]; then
+            is_range_mode=true
+            log_range "Processing PR range: $PR_RANGE (timeout: ${TIMEOUT_SECONDS}s between tasks)"
+        else
+            log_info "Processing single PR: $PR_RANGE"
+        fi
+    fi
 
-The agent should:
-1. Search the codebase for relevant code patterns
-2. Identify likely root causes
-3. Create detailed GitHub issue with reproduction steps
-4. Include specific file paths and potential fixes
-5. Add appropriate labels and priority assessment"
-
-                echo "$bug_prompt" | claude --dangerously-skip-permissions
-            fi
-            ;;
-    esac
+    # Process each number
+    local total_count=0
+    local success_count=0
+    local failed_count=0
+    
+    while IFS= read -r number; do
+        total_count=$((total_count + 1))
+        
+        if [ $total_count -gt 1 ] && [ "$is_range_mode" = true ]; then
+            log_range "Waiting ${TIMEOUT_SECONDS} seconds before next task..."
+            sleep "$TIMEOUT_SECONDS"
+        fi
+        
+        echo ""
+        echo "========================================"
+        if [ "$MODE" = "implement" ]; then
+            echo "TASK $total_count: ISSUE #$number"
+        else
+            echo "TASK $total_count: PR #$number"
+        fi
+        echo "========================================"
+        
+        if process_single_task "$number" "$MODE" "$project_info" "$claude_context" "$is_range_mode" "$AUTO_PR_REVIEW"; then
+            success_count=$((success_count + 1))
+        else
+            failed_count=$((failed_count + 1))
+        fi
+        
+    done <<< "$numbers_to_process"
 
     echo ""
-    log_success "🎉 Enhanced Claude Task Runner with Agent Coordination - Complete!"
+    echo "========================================"
+    echo "BATCH PROCESSING COMPLETE"
+    echo "========================================"
+    log_info "Total tasks: $total_count"
+    log_success "Successful: $success_count"
+    if [ $failed_count -gt 0 ]; then
+        log_error "Failed: $failed_count"
+    fi
+    echo ""
+    
     if [ "$PROMPT_ONLY" = true ]; then
-        log_info "Use without --prompt-only to execute with agent coordination"
+        log_info "Use without --prompt-only to execute these prompts with Claude Code"
+    elif [ "$is_range_mode" = true ]; then
+        if [ "$INTERACTIVE" = true ]; then
+            log_info "All tasks completed in interactive mode."
+        else
+            log_info "All tasks completed in headless mode."
+        fi
+        log_info "Check GitHub for:"
+        log_info "  - PR review comments posted via 'gh pr comment' (for PR reviews)"
+        log_info "  - Issue audit comments and auto-closures (if complete)"
+        log_info "  - New timestamped branches: issue-<number>-<timestamp> (implementation mode only)"
+        log_info "  - Automated PRs created/updated (implementation mode only, when code changes exist)"
+    else
+        # Single task
+        if [ "$INTERACTIVE" = true ]; then
+            log_info "Single task completed in interactive mode."
+        else
+            log_info "Single task completed in headless mode."
+        fi
+        log_info "Check GitHub for results:"
+        log_info "  - PR review comments (for PR reviews) or implementation PRs (for issues)"
     fi
 }
 
-# Run main function
+# Run main function with all arguments
 main "$@"
