@@ -631,55 +631,20 @@ issue_comment() {
 }
 
 # Optionally close issue if completely implemented
-maybe_close_issue() {
+# TODO: Implement proper issue closing logic based on PR approval status
+# Issues should only be closed when:
+# 1. PR has been created and merged, OR
+# 2. PR has been reviewed and approved by maintainer
+# Current auto-close logic removed due to false positive issues
+check_pr_approval_and_close_issue() {
     local number="$1"
-    local audit_file="$2"
+    local pr_number="$2"
     
-    log_info "Analyzing audit output for completion indicators..."
-    
-    # More specific completion indicators to avoid false positives
-    local completion_patterns=(
-        "NOW 100% Complete"
-        "Issue.*fully.*resolved"
-        "Task.*completely.*implemented"
-        "All requirements.*satisfied"
-    )
-    
-    local found_indicator=false
-    local matched_pattern=""
-    
-    for pattern in "${completion_patterns[@]}"; do
-        if grep -q -i "$pattern" "$audit_file"; then
-            found_indicator=true
-            matched_pattern="$pattern"
-            break
-        fi
-    done
-    
-    # Also check for common "work already done" indicators that should NOT auto-close
-    if grep -q -i "already.*complete\|previously.*implemented\|existing.*implementation" "$audit_file"; then
-        log_info "Detected 'work already done' indicators - NOT auto-closing issue #${number}"
-        log_info "Manual review recommended to verify if issue should be closed"
-        return 0
-    fi
-    
-    if [ "$found_indicator" = true ]; then
-        log_info "Detected completion indicator: '$matched_pattern'"
-        log_info "Attempting to close issue #${number}..."
-        
-        local pr_number
-        pr_number=$(gh pr view --repo "${REPO_OWNER}/${REPO_NAME}" --json number -q .number 2>/dev/null || echo "unknown")
-        
-        if gh issue close "$number" --repo "${REPO_OWNER}/${REPO_NAME}" \
-                        --comment "✅ Automated implementation complete. See PR #${pr_number} for details." 2>/dev/null; then
-            log_success "Issue #${number} closed automatically"
-        else
-            log_info "Could not auto-close issue #${number} (may already be closed or lack permissions)"
-        fi
-    else
-        log_info "No specific completion indicators found, leaving issue #${number} open"
-        log_info "Checked patterns: $(printf '"%s" ' "${completion_patterns[@]}")"
-    fi
+    # TODO: Implement logic to check PR approval status via GitHub API
+    # gh pr view $pr_number --json reviewDecision,mergeStateStatus
+    # Only close issue if PR is approved/merged
+    log_info "TODO: Check PR #${pr_number} approval status before closing issue #${number}"
+    log_info "For now, leaving issue #${number} open for manual review"
 }
 
 # Execute Claude with retry logic for rate limiting
@@ -2579,15 +2544,17 @@ process_single_task() {
             log_info "No commits found on current branch vs $main_branch"
         fi
         
-        # Decision logic with detailed reasoning
+        # Determine next action based on detected changes
         if [ "$has_uncommitted_changes" = false ] && [ "$has_branch_commits" = false ]; then
-            log_success "No changes detected (neither uncommitted changes nor branch commits)"
-            log_info "This suggests either: 1) Issue already resolved elsewhere, 2) No work needed, or 3) Implementation error"
-            maybe_close_issue "$number" "$output_file"
+            log_info "No implementation work performed by Claude"
+            log_info "This could indicate: issue already resolved, no work needed, or implementation error"
+            log_info "Leaving issue #${number} open for manual review"
             return 0
-        elif [ "$has_branch_commits" = true ] && [ "$has_uncommitted_changes" = false ]; then
-            log_info "Found existing commits but no uncommitted changes - work may already be complete"
-            log_info "Proceeding with PR creation for existing commits..."
+        fi
+        
+        # We have either uncommitted changes or branch commits - proceed with workflow
+        if [ "$has_branch_commits" = true ] && [ "$has_uncommitted_changes" = false ]; then
+            log_info "Found existing commits - will create/update PR with existing work"
         fi
 
         log_info "Changes detected, proceeding with commit and PR creation..."
