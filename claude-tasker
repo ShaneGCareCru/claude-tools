@@ -472,9 +472,9 @@ generate_intelligent_pr_body() {
     
     # Check if llm tool is available and functional
     if ! command -v llm >/dev/null 2>&1; then
-        log_warning "LLM tool not available, falling back to traditional merge"
-        merge_with_pr_template_fallback "$claude_output_file" "$issue_number" "$mode"
-        return $?
+        log_warning "LLM tool not available, using original Claude output"
+        echo "$claude_output_file"
+        return 0
     fi
     
     # Create comprehensive LLM prompt
@@ -559,10 +559,10 @@ EOF
     intelligent_body=$(llm prompt -f "$output_file" 2>/dev/null)
     
     if [ -z "$intelligent_body" ] || [ "$intelligent_body" = "null" ]; then
-        log_warning "LLM generation failed, falling back to traditional merge"
+        log_warning "LLM generation failed, using original Claude output"
         rm -f "$output_file" 2>/dev/null
-        merge_with_pr_template_fallback "$claude_output_file" "$issue_number" "$mode"
-        return $?
+        echo "$claude_output_file"
+        return 0
     fi
     
     # Write the intelligent output to the file
@@ -579,55 +579,6 @@ EOF
     echo "$output_file"
 }
 
-# Fallback to traditional template merging (when LLM fails)
-merge_with_pr_template_fallback() {
-    local claude_output_file="$1"
-    local issue_number="$2"
-    local mode="$3"
-    
-    # Detect PR template using helper function
-    local template_file
-    if template_file=$(detect_pr_template); then
-        log_info "Found PR template: $template_file"
-    else
-        log_info "No PR template found, using Claude output directly"
-        echo "$claude_output_file"
-        return 0
-    fi
-    
-    # Create secure temporary file
-    local merged_file
-    merged_file=$(mktemp) || { log_error "Failed to create temporary file"; return 1; }
-    
-    # Validate Claude output file exists and is readable
-    if [ ! -f "$claude_output_file" ] || [ ! -r "$claude_output_file" ]; then
-        log_error "Claude output file not found or not readable: $claude_output_file"
-        rm -f "$merged_file" 2>/dev/null
-        return 1
-    fi
-    
-    # Read Claude's output
-    local claude_content
-    claude_content=$(cat "$claude_output_file" 2>/dev/null || echo "")
-    
-    # Validate we got content from Claude
-    if [ -z "$claude_content" ]; then
-        log_warning "Claude output file is empty or unreadable"
-    fi
-    
-    # Use helper function to merge template sections
-    merge_template_sections "$template_file" "$claude_content" "$issue_number" "$mode" "$merged_file"
-    
-    # Validate merged file was created successfully
-    if [ ! -s "$merged_file" ]; then
-        log_error "Failed to create merged template file"
-        rm -f "$merged_file" 2>/dev/null
-        return 1
-    fi
-    
-    log_success "Merged Claude output with PR template: $merged_file"
-    echo "$merged_file"
-}
 
 # Create or update a PR (simplified - only called when changes exist)
 ensure_pr() {
