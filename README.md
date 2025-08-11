@@ -1,121 +1,216 @@
 # Claude Tools
 
-A collection of enhanced tools for working with Claude Code in GitHub workflows.
+A powerful collection of tools for enhancing Claude Code workflows, featuring automated GitHub issue implementation, PR reviews, and intelligent bug analysis using Claude's advanced AI capabilities.
 
-## Claude Tasker
+## Overview
 
-An enhanced Claude Task Runner that provides a context-aware wrapper for Claude Code with advanced GitHub integration capabilities.
+Claude Tools provides a sophisticated task automation system that bridges Claude Code with GitHub workflows. The flagship tool, `claude-tasker`, enables automated issue implementation, code reviews, and bug analysis while maintaining high code quality through structured methodologies.
 
-### Features
+### Key Features
 
-- **Two-stage Claude execution**: prompt-builder → executor (eliminates meta-prompt issues)
-- **Lyra-Dev 4-D methodology** for optimized prompt generation
-- **Status verification protocol** to detect false completion claims
-- **AUDIT-AND-IMPLEMENT workflow**: Claude audits and fixes gaps in one run
-- **Smart PR creation**: only when actual code changes are made
-- **Graceful handling** of "already complete" cases (auto-closes, no unnecessary PRs)
-- **Range processing**: Handle single tasks or ranges (e.g., 230-250)
-- **Automatic branch creation** for each task
-- **Configurable timeout** between tasks for API rate limiting
-- **Interactive or headless mode** support
-- **Project-aware prompts** using CLAUDE.md context
-- **Gap analysis**: focuses on actual missing pieces, not claimed completions
-- **Robust retry logic** with exponential backoff for API limits
-- **Bug report analysis**: Intelligent codebase analysis to create detailed GitHub issues from bug descriptions
+- 🤖 **Automated Issue Implementation** - Transforms GitHub issues into working code with intelligent gap analysis
+- 🔍 **Smart PR Reviews** - Provides detailed code reviews with actionable feedback
+- 🐛 **Intelligent Bug Analysis** - Converts bug descriptions into comprehensive GitHub issues
+- 🎯 **Two-Stage Execution** - Eliminates meta-prompt issues through prompt-builder → executor pattern
+- 📊 **4-D Methodology** - DECONSTRUCT → DIAGNOSE → DEVELOP → DELIVER for systematic problem-solving
+- ✅ **Status Verification** - Detects and prevents false completion claims
+- 🔄 **Batch Processing** - Handle ranges of issues or PRs efficiently
+- 🌿 **Smart Branching** - Automatic timestamped branch creation for each task
+- 💬 **GitHub Integration** - Direct interaction with issues, PRs, and comments via GitHub CLI
 
-### Installation
+## Installation
 
-1. Clone this repository:
-   ```bash
-   git clone <repository-url>
-   cd claude-tools
-   ```
+### Prerequisites
 
-2. Make the script executable:
-   ```bash
-   chmod +x claude-tasker
-   ```
-
-3. Optionally, add to your PATH for global access:
-   ```bash
-   # Add to your ~/.bashrc or ~/.zshrc
-   export PATH="$PATH:/path/to/claude-tools"
-   ```
-
-### Requirements
-
-- **GitHub CLI (`gh`)** - For GitHub API interactions
-- **jq** - JSON processor for parsing API responses
-- **claude** - Claude Code CLI (not required for prompt-only mode)
+- **macOS** or **Linux** (bash 4.0+)
+- **GitHub CLI (`gh`)** - Authenticated with your GitHub account
+- **jq** - JSON processor
+- **Claude CLI** - For execution mode (optional for prompt-only mode)
 - **git** - Version control
-- **CLAUDE.md** - Must exist in the project directory
-- **Git repository** with GitHub remote configured
+- **llm** (optional) - Falls back to Claude if not available
 
-### Usage
+### Quick Start
 
-#### Issue Processing
 ```bash
-# Audit and implement a single task
-claude-tasker <issue_number> [options]
+# Clone the repository
+git clone https://github.com/yourusername/claude-tools.git
+cd claude-tools
 
-# Audit and implement a range of tasks
-claude-tasker <start_issue>-<end_issue> [options]
+# Make the script executable
+chmod +x claude-tasker
+
+# Optional: Add to PATH for global access
+echo 'export PATH="$PATH:'$(pwd)'"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
-#### PR Review
-```bash
-# Review a single PR (read-only analysis)
-claude-tasker --review-pr <pr_number> [options]
+## Usage
 
-# Review a range of PRs (read-only analysis)
-claude-tasker --review-pr <start_pr>-<end_pr> [options]
+### Basic Commands
+
+```bash
+# Process a single GitHub issue
+./claude-tasker 123
+
+# Process a range of issues
+./claude-tasker 100-110
+
+# Review a pull request
+./claude-tasker --review-pr 456
+
+# Analyze a bug and create an issue
+./claude-tasker --bug "Users report login fails after password reset"
+
+# Interactive mode (default is headless)
+./claude-tasker 123 --interactive
 ```
 
-#### Bug Report
+### Advanced Options
+
 ```bash
-# Analyze bug description and create detailed GitHub issue
-claude-tasker --bug "<bug_description>" [options]
+# Generate prompts without execution
+./claude-tasker 123 --prompt-only
+
+# Custom timeout between tasks (default: 10 seconds)
+./claude-tasker 100-105 --timeout 30
+
+# Dry run - skip actual execution
+./claude-tasker 123 --dry-run
+
+# Verbose logging
+./claude-tasker 123 --verbose
 ```
 
-### Workflow
+## How It Works
 
-#### For Issues:
-1. **Meta-prompt generation** → optimized prompt creation
-2. **Audit phase** → identify actual gaps and missing implementations
-3. **Implementation** → fix identified gaps
-4. **Comment** → provide transparency on audit results
-5. **PR creation** → only if actual code changes were made
+### Architecture
 
-#### For PR Reviews:
-1. **Direct prompt** → review analysis
-2. **Comment generation** → `gh pr comment` (no branches/PRs/separate comments)
+Claude Tools uses a sophisticated multi-stage approach:
 
-#### For Bug Reports:
-1. **Codebase analysis** → search for relevant code patterns and potential causes
-2. **Gap analysis** → identify likely root causes based on code examination
-3. **Issue creation** → generate comprehensive GitHub issue with structured bug report
-4. **Labeling** → apply appropriate labels for priority, severity, and area
+1. **Context Analysis** - Reads project context from `CLAUDE.md`
+2. **Agent Selection** - Chooses appropriate specialized agent
+3. **Meta-Prompt Generation** - Creates optimized prompts using 4-D methodology
+4. **Execution** - Runs Claude with generated prompts
+5. **Verification** - Validates results and handles edge cases
+6. **GitHub Integration** - Updates issues, creates PRs, posts comments
 
-### Environment Setup
+### Agent System
 
-The script must be run from a directory containing:
-- `CLAUDE.md` - Project context file
-- A git repository with GitHub remote configured
+The tool uses specialized agents stored in `.claude/agents/`:
+- `github-issue-implementer` - For implementing GitHub issues
+- `pr-reviewer` - For reviewing pull requests
+- `bug-analyzer` - For analyzing bug reports
+- Additional custom agents can be added
 
-### Dependencies Check
+### Project Configuration
 
-The script automatically validates that all required tools are installed and the environment is properly configured before execution.
+Projects should include a `CLAUDE.md` file in the root directory containing:
+- Repository overview
+- Architecture details
+- Development guidelines
+- Common commands
+- Any project-specific instructions
 
-### Error Handling
+## Examples
 
-- Robust retry logic with exponential backoff for API rate limits
-- Graceful handling of edge cases (already completed tasks, etc.)
-- Comprehensive logging with color-coded output levels (INFO, SUCCESS, WARNING, ERROR, RANGE)
+### Implementing an Issue
 
-### Contributing
+```bash
+$ ./claude-tasker 234
+[INFO] Processing issue #234: Add user authentication
+[INFO] Creating branch: issue-234-20240115-143022
+[INFO] Generating implementation prompt...
+[SUCCESS] Implementation complete with 5 files changed
+[INFO] Creating PR: "Fix #234: Add user authentication"
+```
 
-This tool is designed to work with Claude Code and GitHub workflows. Ensure any modifications maintain compatibility with the existing GitHub API integration and Claude Code CLI.
+### Reviewing Multiple PRs
 
-### License
+```bash
+$ ./claude-tasker --review-pr 100-105
+[RANGE] Processing PR range: 100-105
+[INFO] Reviewing PR #100: Update dependencies
+[SUCCESS] Review posted with 3 suggestions
+...
+[INFO] Completed 6 PRs in range
+```
 
-[Add your license information here]
+### Bug Analysis
+
+```bash
+$ ./claude-tasker --bug "API returns 500 error when filtering by date"
+[INFO] Analyzing bug description...
+[INFO] Searching codebase for related patterns...
+[SUCCESS] Created issue #789 with detailed analysis and reproduction steps
+```
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+# Fork and clone the repository
+git clone https://github.com/yourusername/claude-tools.git
+cd claude-tools
+
+# Create a feature branch
+git checkout -b feature/your-feature-name
+
+# Make your changes and test
+./claude-tasker --dry-run 123
+
+# Submit a pull request
+```
+
+### Code Style
+
+- Use bash best practices and shellcheck compliance
+- Maintain comprehensive error handling
+- Add logging for significant operations
+- Update documentation for new features
+
+## Troubleshooting
+
+### Common Issues
+
+1. **"gh not authenticated"**
+   ```bash
+   gh auth login
+   ```
+
+2. **"CLAUDE.md not found"**
+   - Ensure you're running from a project root with `CLAUDE.md`
+
+3. **"Rate limit exceeded"**
+   - The tool includes automatic retry with exponential backoff
+   - Use `--timeout` to increase delay between operations
+
+### Debug Mode
+
+```bash
+# Enable verbose logging
+export CLAUDE_TASKER_DEBUG=1
+./claude-tasker 123
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Built for the Claude Code community
+- Inspired by modern DevOps automation practices
+- Uses the Lyra-Dev 4-D methodology for structured problem-solving
+
+## Support
+
+- 📖 [Documentation](https://github.com/yourusername/claude-tools/wiki)
+- 🐛 [Issue Tracker](https://github.com/yourusername/claude-tools/issues)
+- 💬 [Discussions](https://github.com/yourusername/claude-tools/discussions)
+
+---
+
+Made with ❤️ by the Claude Tools community
