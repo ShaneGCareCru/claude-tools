@@ -163,6 +163,51 @@ workspace_hygiene() {
     log_success "Workspace cleaned and updated"
 }
 
+# Prompt user for confirmation before workspace cleanup
+confirm_workspace_cleanup() {
+    # Skip prompt in non-interactive environments
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        log_info "Non-interactive environment detected, proceeding with workspace cleanup"
+        return 0
+    fi
+    
+    # Skip prompt if CLAUDE_TASKER_AUTO_CLEANUP is set (for CI/automation)
+    if [ -n "$CLAUDE_TASKER_AUTO_CLEANUP" ]; then
+        log_info "Auto-cleanup enabled via CLAUDE_TASKER_AUTO_CLEANUP, proceeding with workspace cleanup"
+        return 0
+    fi
+    
+    log_warning "⚠️  WORKSPACE CLEANUP REQUIRED"
+    echo "This operation will:"
+    echo "  • Remove all uncommitted changes (git reset --hard)"
+    echo "  • Delete all untracked files and directories (git clean -fd)" 
+    echo "  • Switch to main branch and pull latest changes"
+    echo ""
+    echo "Any local work that hasn't been committed and pushed will be PERMANENTLY LOST."
+    echo ""
+    
+    local response
+    while true; do
+        read -p "Do you want to proceed with workspace cleanup? [y/N]: " response
+        case "$response" in
+            [Yy]|[Yy][Ee][Ss])
+                log_info "User confirmed workspace cleanup"
+                return 0
+                ;;
+            [Nn]|[Nn][Oo]|"")
+                log_info "User declined workspace cleanup"
+                echo "Operation cancelled. To proceed:"
+                echo "  • Commit your changes: git add . && git commit -m 'your message'"
+                echo "  • Or set CLAUDE_TASKER_AUTO_CLEANUP=1 to skip this prompt"
+                return 1
+                ;;
+            *)
+                echo "Please answer 'y' for yes or 'n' for no."
+                ;;
+        esac
+    done
+}
+
 # Always commit and push changes (simplified - only called when changes exist)
 commit_and_push() {
     local branch_name="$1"
@@ -737,7 +782,24 @@ extract_prompt_text() {
     ' "$json_in" >"$prompt_out"
 }
 
-
+# Detect the default branch (main or master)
+detect_default_branch() {
+    # Check if main exists
+    if git show-ref --verify --quiet refs/heads/main; then
+        echo "main"
+    elif git show-ref --verify --quiet refs/heads/master; then
+        echo "master"
+    else
+        # Try to detect from remote
+        local remote_head=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+        if [ -n "$remote_head" ]; then
+            echo "$remote_head"
+        else
+            # Default fallback
+            echo "main"
+        fi
+    fi
+}
 
 # Create a new branch with timestamp (PURE - only outputs branch name)
 create_branch() {
@@ -753,8 +815,9 @@ create_branch() {
     fi
 
     # Create and checkout new branch (workspace already cleaned by workspace_hygiene)
-    # Use -B to force creation/reset and checkout main as base
-    if git checkout -B "$branch_name" main >/dev/null 2>&1; then
+    # Use -B to force creation/reset and checkout the base branch
+    local base_branch="${BASE_BRANCH:-$(detect_default_branch)}"
+    if git checkout -B "$branch_name" "$base_branch" >/dev/null 2>&1; then
         # PURE OUTPUT: only the branch name, no logging
         echo "$branch_name"
         return 0
@@ -964,6 +1027,7 @@ show_usage() {
     echo "  --interactive       Use interactive Claude Code mode instead of headless (-p) mode"
     echo "  --auto-pr-review    Automatically review the PR after implementing an issue"
     echo "  --coder <claude|codex> Select AI coder to use (default: claude)"
+    echo "  --base-branch <branch> Specify base branch for new branches (default: auto-detect main/master)"
     echo ""
     echo "Examples:"
     echo "  $0 316                                    # Audit and implement single issue (headless)"
@@ -983,6 +1047,7 @@ show_usage() {
     echo "  $0 --bug \"Payment processing timeout\" --interactive  # Interactive bug analysis"
     echo "  $0 316 --coder codex                       # Use Codex instead of Claude"
     echo "  $0 316 --coder codex --interactive         # Use Codex interactively"
+    echo "  $0 316 --base-branch develop               # Create branch from 'develop' instead of main/master"
     echo ""
     echo "Requirements:"
     echo "  - Must be run from a directory containing CLAUDE.md"
@@ -1021,6 +1086,7 @@ parse_arguments() {
     AUTO_PR_REVIEW=false
     TIMEOUT_SECONDS=30  # Default timeout
     CODER="claude"  # Default coder (claude or codex)
+    BASE_BRANCH=""  # Base branch for creating new branches
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -1093,6 +1159,16 @@ parse_arguments() {
                     shift
                 else
                     log_error "--coder requires either 'claude' or 'codex'"
+                    exit 1
+                fi
+                ;;
+            --base-branch)
+                shift
+                if [[ $# -gt 0 && -n "$1" ]]; then
+                    BASE_BRANCH="$1"
+                    shift
+                else
+                    log_error "--base-branch requires a branch name"
                     exit 1
                 fi
                 ;;
