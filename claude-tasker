@@ -376,15 +376,26 @@ Create a comprehensive, professional PR body that:
 - Make it reviewer-friendly with clear structure and actionable information
 - Include any breaking changes, migration notes, or special considerations
 
+## Critical Constraint:
+**KEEP OUTPUT CONCISE** - The final PR body must be under 10,000 characters total. If the context data is extensive, intelligently summarize the most important points rather than including everything. Focus on:
+1. Key changes made (not every detail)
+2. Most important technical decisions
+3. Critical testing considerations
+4. Essential reviewer information
+
 ## Output Format:
 Generate ONLY the final PR body markdown - no explanations or meta-commentary.
 
 EOF
     
-    # Add context data to the prompt
+    # Add context data to the prompt - let LLM handle intelligent summarization
+    # Log input sizes for debugging
+    log_info "Context sizes - Diff: ${#git_diff}, Analysis: ${#claude_analysis}, Template: ${#template_content}, Commits: ${#recent_commits}"
+    
     cat >> "$output_file" << EOF
 
 ## CONTEXT DATA:
+NOTE: This context may be extensive. Please intelligently summarize and extract only the most important information for the PR body, keeping the final output under 10,000 characters.
 
 ### Git Diff:
 \`\`\`diff
@@ -416,16 +427,33 @@ $recent_commits
 
 ---
 
-Generate the intelligent PR body now:
+Generate the intelligent PR body now (remember: keep under 10,000 characters total):
 EOF
     
-    # Generate the intelligent PR body using llm
+    # Generate the intelligent PR body using llm with better error handling
     local intelligent_body
-    intelligent_body=$(llm prompt -f "$output_file" 2>/dev/null)
+    local llm_error_log="/tmp/llm-pr-error-$$.log"
     
-    if [ -z "$intelligent_body" ] || [ "$intelligent_body" = "null" ]; then
-        log_warning "LLM generation failed, using original Claude output"
-        rm -f "$output_file" 2>/dev/null
+    # Check final prompt file size before processing
+    local final_prompt_size=$(wc -c < "$output_file" 2>/dev/null || echo "0")
+    log_info "Final LLM prompt size: ${final_prompt_size} bytes"
+    
+    if [ "$final_prompt_size" -gt 500000 ]; then
+        log_warning "LLM prompt is very large (${final_prompt_size} bytes) - this may cause issues"
+    fi
+    
+    intelligent_body=$(llm prompt -f "$output_file" 2>"$llm_error_log")
+    local llm_exit_code=$?
+    
+    # Check for LLM execution errors
+    if [ $llm_exit_code -ne 0 ] || [ -z "$intelligent_body" ] || [ "$intelligent_body" = "null" ]; then
+        if [ -s "$llm_error_log" ]; then
+            log_warning "LLM generation failed with error: $(cat "$llm_error_log")"
+        else
+            log_warning "LLM generation failed with exit code $llm_exit_code"
+        fi
+        log_warning "Using original Claude output instead of LLM-enhanced version"
+        rm -f "$output_file" "$llm_error_log" 2>/dev/null
         echo "$claude_output_file"
         return 0
     fi
@@ -433,14 +461,23 @@ EOF
     # Write the intelligent output to the file
     echo "$intelligent_body" > "$output_file"
     
-    # Validate output was created successfully
+    # Validate output was created successfully and check size
     if [ ! -s "$output_file" ]; then
         log_error "Failed to generate intelligent PR body"
-        rm -f "$output_file" 2>/dev/null
+        rm -f "$output_file" "$llm_error_log" 2>/dev/null
         return 1
     fi
     
-    log_success "Generated intelligent PR body: $output_file"
+    local output_size=${#intelligent_body}
+    if [ "$output_size" -gt 15000 ]; then
+        log_warning "Generated PR body is quite large (${output_size} characters) - this might cause issues"
+        # Don't fail, just warn - let GitHub handle the limit
+    fi
+    
+    # Clean up error log
+    rm -f "$llm_error_log" 2>/dev/null
+    
+    log_success "Generated intelligent PR body: $output_file (${output_size} characters)"
     echo "$output_file"
 }
 
