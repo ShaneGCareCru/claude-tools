@@ -207,9 +207,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- 📖 [Documentation](https://github.com/ShaneGCareCru/claude-tools/wiki)
-- 🐛 [Issue Tracker](https://github.com/ShaneGCareCru/claude-tools/issues)
-- 💬 [Discussions](https://github.com/ShaneGCareCru/claude-tools/discussions)
+- 🐛 [Issue Tracker](https://github.com/ShaneGCareCru/claude-tools/issues) - Report bugs and request features
+- 📖 [README](https://github.com/ShaneGCareCru/claude-tools#readme) - Main documentation
+- 🔧 [Source Code](https://github.com/ShaneGCareCru/claude-tools) - Browse and contribute
 
 ---
 
