@@ -272,36 +272,73 @@ commit_and_push() {
 }
 
 # Merge Claude's output with PR template if available
-merge_with_pr_template() {
-    local claude_output_file="$1"
-    local issue_number="$2"
-    local mode="$3"
-    
-    # Look for PR template in common locations
-    local template_file=""
+# Helper function to detect PR template files
+detect_pr_template() {
     for template_path in ".github/pull_request_template.md" ".github/PULL_REQUEST_TEMPLATE.md" "pull_request_template.md"; do
         if [ -f "$template_path" ]; then
-            template_file="$template_path"
-            log_info "Found PR template: $template_path"
-            break
+            echo "$template_path"
+            return 0
         fi
     done
+    return 1
+}
+
+# Helper function to extract Claude content sections
+extract_claude_content() {
+    local claude_content="$1"
+    local section_type="$2"
     
-    # If no template found, return original file
-    if [ -z "$template_file" ]; then
-        log_info "No PR template found, using Claude output directly"
-        echo "$claude_output_file"
-        return 0
+    case "$section_type" in
+        "deliver")
+            if [[ "$claude_content" == *"# DELIVER"* ]]; then
+                echo "### Implementation Summary"
+                # More robust extraction using awk instead of fragile sed
+                echo "$claude_content" | awk '/^# DELIVER/,/^# [A-Z]/{if($0 !~ /^# [A-Z]/ || NR==1) print}' | head -20
+            fi
+            ;;
+        "summary")
+            if [[ "$claude_content" == *"## Summary"* ]]; then
+                # More robust extraction of summary section
+                echo "$claude_content" | awk '/^## Summary/,/^##/{if($0 !~ /^##/ || NR==1) print}' | head -10
+            fi
+            ;;
+        *)
+            echo "Automated implementation"
+            ;;
+    esac
+}
+
+# Helper function to determine change type from content and mode
+determine_change_type() {
+    local claude_content="$1"
+    local mode="$2"
+    
+    if [ "$mode" = "implement" ]; then
+        if echo "$claude_content" | grep -qi "bug\\|fix\\|error"; then
+            echo "- [x] Bug fix (non-breaking change which fixes an issue)"
+            echo "- [ ] New feature (non-breaking change which adds functionality)"
+        else
+            echo "- [ ] Bug fix (non-breaking change which fixes an issue)"
+            echo "- [x] New feature (non-breaking change which adds functionality)"
+        fi
+    else
+        echo "- [ ] Bug fix (non-breaking change which fixes an issue)"
+        echo "- [x] New feature (non-breaking change which adds functionality)"
     fi
+    echo "- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)"
+    echo "- [ ] Documentation update"
+    echo "- [ ] Code refactoring"
+    echo "- [ ] Performance improvement"
+}
+
+# Helper function to merge template sections with Claude content
+merge_template_sections() {
+    local template_file="$1"
+    local claude_content="$2"
+    local issue_number="$3"
+    local mode="$4"
+    local merged_file="$5"
     
-    # Create merged output file
-    local merged_file="/tmp/pr-template-merged-${issue_number}.md"
-    
-    # Read Claude's output
-    local claude_content
-    claude_content=$(cat "$claude_output_file" 2>/dev/null || echo "")
-    
-    # Process template and merge with Claude content
     {
         # Start with template structure
         while IFS= read -r line || [ -n "$line" ]; do
@@ -312,10 +349,9 @@ merge_with_pr_template() {
                     echo ""
                     # Add Claude's analysis/summary as description
                     if [[ "$claude_content" == *"# DELIVER"* ]]; then
-                        echo "### Implementation Summary"
-                        echo "$claude_content" | sed -n '/# DELIVER/,/# [A-Z]/p' | head -20
+                        extract_claude_content "$claude_content" "deliver"
                     elif [[ "$claude_content" == *"## Summary"* ]]; then
-                        echo "$claude_content" | sed -n '/## Summary/,/##/p' | head -10
+                        extract_claude_content "$claude_content" "summary"
                     else
                         echo "Automated implementation for issue #${issue_number}"
                         echo ""
@@ -325,33 +361,17 @@ merge_with_pr_template() {
                     ;;
                 "## Type of Change"*)
                     echo "$line"
-                    echo "<!-- Mark the relevant option with an \"x\" -->"
+                    echo "<!-- Mark the relevant option with an \\\"x\\\" -->"
                     echo ""
-                    # Auto-detect change type based on mode and content
-                    if [ "$mode" = "implement" ]; then
-                        if echo "$claude_content" | grep -qi "bug\|fix\|error"; then
-                            echo "- [x] Bug fix (non-breaking change which fixes an issue)"
-                            echo "- [ ] New feature (non-breaking change which adds functionality)"
-                        else
-                            echo "- [ ] Bug fix (non-breaking change which fixes an issue)"
-                            echo "- [x] New feature (non-breaking change which adds functionality)"
-                        fi
-                    else
-                        echo "- [ ] Bug fix (non-breaking change which fixes an issue)"
-                        echo "- [x] New feature (non-breaking change which adds functionality)"
-                    fi
-                    echo "- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)"
-                    echo "- [ ] Documentation update"
-                    echo "- [ ] Code refactoring"
-                    echo "- [ ] Performance improvement"
+                    determine_change_type "$claude_content" "$mode"
                     echo ""
                     ;;
                 "## Testing"*)
                     echo "$line"
                     echo "<!-- Automated testing via claude-tasker -->"
                     echo ""
-                    echo "- [x] Tested with \`./claude-tasker\` on single issue"
-                    echo "- [ ] Tested with \`./claude-tasker\` on issue range"
+                    echo "- [x] Tested with \\`./claude-tasker\\` on single issue"
+                    echo "- [ ] Tested with \\`./claude-tasker\\` on issue range"
                     echo "- [ ] Tested PR review functionality"
                     echo "- [ ] Tested bug analysis functionality"
                     echo "- [x] Verified error handling works correctly"
@@ -364,7 +384,7 @@ merge_with_pr_template() {
                 "Fixes #(issue number)")
                     echo "Fixes #${issue_number}"
                     ;;
-                "<!-- Mark completed items with an \"x\" -->"*)
+                "<!-- Mark completed items with an \\\"x\\\" -->"*)
                     echo "$line"
                     echo ""
                     echo "- [x] My code follows the style guidelines of this project"
@@ -372,7 +392,7 @@ merge_with_pr_template() {
                     echo "- [x] I have added comments where necessary"
                     echo "- [x] I have updated the documentation if needed"
                     echo "- [x] My changes generate no new warnings"
-                    echo "- [x] Scripts pass \`shellcheck\` validation"
+                    echo "- [x] Scripts pass \\`shellcheck\\` validation"
                     echo ""
                     ;;
                 "<!-- Add any other context or screenshots about the PR here -->"*)
@@ -397,6 +417,52 @@ merge_with_pr_template() {
             esac
         done < "$template_file"
     } > "$merged_file"
+}
+
+merge_with_pr_template() {
+    local claude_output_file="$1"
+    local issue_number="$2"
+    local mode="$3"
+    
+    # Detect PR template using helper function
+    local template_file
+    if template_file=$(detect_pr_template); then
+        log_info "Found PR template: $template_file"
+    else
+        log_info "No PR template found, using Claude output directly"
+        echo "$claude_output_file"
+        return 0
+    fi
+    
+    # Create secure temporary file
+    local merged_file
+    merged_file=$(mktemp) || { log_error "Failed to create temporary file"; return 1; }
+    
+    # Validate Claude output file exists and is readable
+    if [ ! -f "$claude_output_file" ] || [ ! -r "$claude_output_file" ]; then
+        log_error "Claude output file not found or not readable: $claude_output_file"
+        rm -f "$merged_file" 2>/dev/null
+        return 1
+    fi
+    
+    # Read Claude's output
+    local claude_content
+    claude_content=$(cat "$claude_output_file" 2>/dev/null || echo "")
+    
+    # Validate we got content from Claude
+    if [ -z "$claude_content" ]; then
+        log_warning "Claude output file is empty or unreadable"
+    fi
+    
+    # Use helper function to merge template sections
+    merge_template_sections "$template_file" "$claude_content" "$issue_number" "$mode" "$merged_file"
+    
+    # Validate merged file was created successfully
+    if [ ! -s "$merged_file" ]; then
+        log_error "Failed to create merged template file"
+        rm -f "$merged_file" 2>/dev/null
+        return 1
+    fi
     
     log_success "Merged Claude output with PR template: $merged_file"
     echo "$merged_file"
@@ -488,8 +554,11 @@ ensure_pr() {
     
     # Clean up temporary template file if it was created
     if [ "$final_body_file" != "$body_file" ] && [ -f "$final_body_file" ]; then
-        rm -f "$final_body_file"
-        log_info "Cleaned up temporary PR template file: $final_body_file"
+        if rm -f "$final_body_file" 2>/dev/null; then
+            log_info "Cleaned up temporary PR template file: $final_body_file"
+        else
+            log_warning "Failed to clean up temporary PR template file: $final_body_file"
+        fi
     fi
     
     log_info "=== END PR DEBUG ==="
