@@ -33,7 +33,7 @@ Claude Tools provides a sophisticated task automation system that bridges Claude
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/claude-tools.git
+git clone https://github.com/ShaneGCareCru/claude-tools.git
 cd claude-tools
 
 # Make the script executable
@@ -146,13 +146,13 @@ $ ./claude-tasker --bug "API returns 500 error when filtering by date"
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+We welcome contributions!
 
 ### Development Setup
 
 ```bash
 # Fork and clone the repository
-git clone https://github.com/yourusername/claude-tools.git
+git clone https://github.com/ShaneGCareCru/claude-tools.git
 cd claude-tools
 
 # Create a feature branch
@@ -207,9 +207,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- 📖 [Documentation](https://github.com/yourusername/claude-tools/wiki)
-- 🐛 [Issue Tracker](https://github.com/yourusername/claude-tools/issues)
-- 💬 [Discussions](https://github.com/yourusername/claude-tools/discussions)
+- 📖 [Documentation](https://github.com/ShaneGCareCru/claude-tools/wiki)
+- 🐛 [Issue Tracker](https://github.com/ShaneGCareCru/claude-tools/issues)
+- 💬 [Discussions](https://github.com/ShaneGCareCru/claude-tools/discussions)
 
 ---
 
