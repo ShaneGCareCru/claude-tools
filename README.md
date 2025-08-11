@@ -195,6 +195,113 @@ export CLAUDE_TASKER_DEBUG=1
 ./claude-tasker 123
 ```
 
+## GitHub Actions Integration (Beta)
+
+> ⚠️ **Beta Feature**: The following GitHub Actions integration examples are theoretical and have not been fully tested. Use with caution in production environments.
+
+Claude Tools can be integrated into GitHub Actions workflows to automate code reviews and issue implementation. Here's how it could work:
+
+### Automated PR Reviews
+
+Create `.github/workflows/claude-pr-review.yml`:
+
+```yaml
+name: Claude PR Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Claude Tools
+        run: |
+          # Clone claude-tools to runner
+          git clone https://github.com/ShaneGCareCru/claude-tools.git /tmp/claude-tools
+          chmod +x /tmp/claude-tools/claude-tasker
+          
+      - name: Run Claude Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd ${{ github.workspace }}
+          /tmp/claude-tools/claude-tasker --review-pr ${{ github.event.pull_request.number }}
+```
+
+### Automated Issue Implementation
+
+Create `.github/workflows/claude-issue-implement.yml`:
+
+```yaml
+name: Claude Issue Implementation
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  implement:
+    # Only run on issues labeled 'claude-implement'
+    if: contains(github.event.issue.labels.*.name, 'claude-implement')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Claude Tools
+        run: |
+          git clone https://github.com/ShaneGCareCru/claude-tools.git /tmp/claude-tools
+          chmod +x /tmp/claude-tools/claude-tasker
+          
+      - name: Configure Git
+        run: |
+          git config --global user.name "Claude Bot"
+          git config --global user.email "claude-bot@users.noreply.github.com"
+          
+      - name: Implement Issue
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd ${{ github.workspace }}
+          /tmp/claude-tools/claude-tasker ${{ github.event.issue.number }}
+```
+
+### Configuration Requirements
+
+1. **Add Anthropic API Key**: 
+   - Go to Settings → Secrets → Actions
+   - Add `ANTHROPIC_API_KEY` with your API key
+
+2. **Permissions**: 
+   - Ensure Actions have write permissions for PRs and issues
+   - Settings → Actions → General → Workflow permissions
+
+3. **Claude CLI Installation**:
+   - The workflow would need to install Claude CLI on the runner
+   - Could be done via npm, homebrew, or direct download
+
+### Security Considerations
+
+- **API Key Protection**: Never commit API keys; use GitHub Secrets
+- **Rate Limiting**: Implement appropriate delays between API calls
+- **Resource Limits**: Set timeout limits on Actions to prevent runaway costs
+- **Review Output**: Always review Claude's PRs before merging
+- **Selective Triggers**: Use labels or specific conditions to control when automation runs
+
+### Potential Enhancements
+
+- Integrate with Claude's official GitHub App (when available)
+- Add cost tracking and budget limits
+- Implement review approval requirements
+- Add test suite execution before PR creation
+- Use matrix builds for handling multiple issues/PRs
+
+This integration would enable teams to leverage Claude's capabilities directly in their GitHub workflow, automating routine tasks while maintaining human oversight for critical decisions.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
@@ -207,8 +314,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
+- 📖 [Documentation](https://github.com/ShaneGCareCru/claude-tools/wiki) - Detailed guides and documentation
 - 🐛 [Issue Tracker](https://github.com/ShaneGCareCru/claude-tools/issues) - Report bugs and request features
-- 📖 [README](https://github.com/ShaneGCareCru/claude-tools#readme) - Main documentation
+- 💬 [Discussions](https://github.com/ShaneGCareCru/claude-tools/discussions) - Ask questions and share ideas
 - 🔧 [Source Code](https://github.com/ShaneGCareCru/claude-tools) - Browse and contribute
 
 ---
