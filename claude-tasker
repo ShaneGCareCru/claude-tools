@@ -292,9 +292,9 @@ generate_intelligent_pr_body() {
     
     log_info "Generating intelligent PR body using LLM synthesis..."
     
-    # Create secure temporary file for output
-    local output_file
-    output_file=$(mktemp) || { log_error "Failed to create temporary file"; return 1; }
+    # Create secure temporary file for output with shorter path for gh compatibility
+    local output_file="/tmp/pr-body-$$.md"
+    touch "$output_file" || { log_error "Failed to create temporary file"; return 1; }
     
     # Validate Claude output file exists and is readable
     if [ ! -f "$claude_output_file" ] || [ ! -r "$claude_output_file" ]; then
@@ -518,10 +518,16 @@ ensure_pr() {
         local existing_pr_number
         existing_pr_number=$(echo "$existing_pr_info" | jq -r '.number' 2>/dev/null || echo "")
         
-        if gh pr edit "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$final_body_file"; then
+        # Debug: log file path and size before attempting PR edit
+        log_info "PR edit - body file: $final_body_file ($(wc -c < "$final_body_file" 2>/dev/null || echo "0") bytes)"
+        
+        if gh pr edit "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --body-file "$final_body_file" 2>&1; then
             log_success "PR updated for branch: ${branch}"
         else
-            log_warning "Failed to update PR body for branch: ${branch}"
+            local exit_code=$?
+            log_error "Failed to update PR body for branch: ${branch} (exit code: $exit_code)"
+            log_error "Body file path: $final_body_file"
+            log_error "Body file size: $(wc -c < "$final_body_file" 2>/dev/null || echo "unknown") bytes"
         fi
         
         # Return PR number for tracking
@@ -553,9 +559,16 @@ ensure_pr() {
             main_branch="master"
         fi
         
+        # Debug: log file path and size before attempting PR create
+        log_info "PR create - body file: $final_body_file ($(wc -c < "$final_body_file" 2>/dev/null || echo "0") bytes)"
         log_info "Creating PR: title='${title}', base='${main_branch}', head='${branch}'"
-        if gh pr create --repo "${REPO_OWNER}/${REPO_NAME}" --base "$main_branch" --head "$branch" \
-                        --title "$title" --body-file "$final_body_file" >/dev/null; then
+        
+        local pr_create_output
+        pr_create_output=$(gh pr create --repo "${REPO_OWNER}/${REPO_NAME}" --base "$main_branch" --head "$branch" \
+                        --title "$title" --body-file "$final_body_file" 2>&1)
+        local pr_create_exit_code=$?
+        
+        if [ $pr_create_exit_code -eq 0 ]; then
             local new_pr_info
             new_pr_info=$(gh pr view "$branch" --repo "${REPO_OWNER}/${REPO_NAME}" --json number,url)
             local new_pr_url
@@ -569,7 +582,16 @@ ensure_pr() {
             # Return PR number for tracking
             echo "$new_pr_number"
         else
-            log_error "Failed to create PR for branch: ${branch}"
+            log_error "Failed to create PR for branch: ${branch} (exit code: $pr_create_exit_code)"
+            log_error "PR create output: $pr_create_output"
+            log_error "Body file path: $final_body_file"
+            log_error "Body file size: $(wc -c < "$final_body_file" 2>/dev/null || echo "unknown") bytes"
+            if [ -f "$final_body_file" ]; then
+                log_error "Body file exists: yes"
+                log_error "Body file readable: $([ -r "$final_body_file" ] && echo "yes" || echo "no")"
+            else
+                log_error "Body file exists: no"
+            fi
             return 1
         fi
     fi
