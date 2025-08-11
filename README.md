@@ -243,6 +243,26 @@ jobs:
         with:
           fetch-depth: 0  # Full history for better context
       
+      - name: Validate Secrets
+        run: |
+          # Check all required secrets are present
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "❌ Error: ANTHROPIC_API_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "❌ Error: OPENAI_API_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.GH_PAT }}" ]; then
+            echo "❌ Error: GH_PAT secret is not set"
+            exit 1
+          fi
+          
+          echo "✅ All required secrets are configured"
+          
       - name: Install Dependencies
         run: |
           # Install jq (JSON processor)
@@ -264,10 +284,28 @@ jobs:
           git clone https://github.com/ShaneGCareCru/claude-tools.git /tmp/claude-tools
           chmod +x /tmp/claude-tools/claude-tasker
           
+      - name: Verify Dependencies
+        run: |
+          # Check all required tools are installed
+          echo "Checking required dependencies..."
+          
+          command -v jq >/dev/null 2>&1 || { echo "❌ jq is not installed"; exit 1; }
+          command -v gh >/dev/null 2>&1 || { echo "❌ gh CLI is not installed"; exit 1; }
+          command -v llm >/dev/null 2>&1 || { echo "❌ llm is not installed"; exit 1; }
+          command -v claude >/dev/null 2>&1 || { echo "❌ claude CLI is not installed"; exit 1; }
+          command -v git >/dev/null 2>&1 || { echo "❌ git is not installed"; exit 1; }
+          
+          [ -x /tmp/claude-tools/claude-tasker ] || { echo "❌ claude-tasker is not executable"; exit 1; }
+          
+          echo "✅ All dependencies verified"
+          
       - name: Configure GitHub CLI
         run: |
           # Use PAT instead of default token
           echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
+          
+          # Verify authentication
+          gh auth status || { echo "❌ GitHub CLI authentication failed"; exit 1; }
           
       - name: Run Claude Review
         env:
@@ -312,6 +350,29 @@ jobs:
           token: ${{ secrets.GH_PAT }}  # Use PAT for push access
           fetch-depth: 0
       
+      - name: Validate Secrets
+        run: |
+          # Check all required secrets are present
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "❌ Error: ANTHROPIC_API_KEY secret is not set"
+            echo "Please add this secret in Settings → Secrets → Actions"
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "❌ Error: OPENAI_API_KEY secret is not set"
+            echo "Please add this secret in Settings → Secrets → Actions"
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.GH_PAT }}" ]; then
+            echo "❌ Error: GH_PAT secret is not set"
+            echo "Please create a Personal Access Token with 'repo' scope"
+            exit 1
+          fi
+          
+          echo "✅ All required secrets are configured"
+          
       - name: Install Dependencies
         run: |
           # System dependencies
@@ -328,6 +389,24 @@ jobs:
           git clone https://github.com/ShaneGCareCru/claude-tools.git /tmp/claude-tools
           chmod +x /tmp/claude-tools/claude-tasker
           
+      - name: Verify Dependencies
+        run: |
+          # Check all required tools are installed
+          echo "Checking required dependencies..."
+          
+          command -v jq >/dev/null 2>&1 || { echo "❌ jq is not installed"; exit 1; }
+          command -v gh >/dev/null 2>&1 || { echo "❌ gh CLI is not installed"; exit 1; }
+          command -v llm >/dev/null 2>&1 || { echo "❌ llm is not installed"; exit 1; }
+          command -v claude >/dev/null 2>&1 || { echo "❌ claude CLI is not installed"; exit 1; }
+          command -v git >/dev/null 2>&1 || { echo "❌ git is not installed"; exit 1; }
+          
+          [ -x /tmp/claude-tools/claude-tasker ] || { echo "❌ claude-tasker is not executable"; exit 1; }
+          
+          # Test LLM tool configuration
+          llm models list | grep -q "gpt" || { echo "❌ LLM tool not configured properly"; exit 1; }
+          
+          echo "✅ All dependencies verified"
+          
       - name: Configure Git and GitHub
         run: |
           # Git configuration
@@ -336,6 +415,9 @@ jobs:
           
           # GitHub CLI with PAT
           echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
+          
+          # Verify authentication
+          gh auth status || { echo "❌ GitHub CLI authentication failed"; exit 1; }
           
       - name: Create CLAUDE.md if missing
         run: |
