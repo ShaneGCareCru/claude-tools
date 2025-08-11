@@ -419,7 +419,168 @@ merge_template_sections() {
     } > "$merged_file"
 }
 
-merge_with_pr_template() {
+# Intelligent LLM-powered PR body generation
+generate_intelligent_pr_body() {
+    local claude_output_file="$1"
+    local issue_number="$2"
+    local mode="$3"
+    
+    log_info "Generating intelligent PR body using LLM synthesis..."
+    
+    # Create secure temporary file for output
+    local output_file
+    output_file=$(mktemp) || { log_error "Failed to create temporary file"; return 1; }
+    
+    # Validate Claude output file exists and is readable
+    if [ ! -f "$claude_output_file" ] || [ ! -r "$claude_output_file" ]; then
+        log_error "Claude output file not found or not readable: $claude_output_file"
+        rm -f "$output_file" 2>/dev/null
+        return 1
+    fi
+    
+    # Gather all context for intelligent synthesis
+    log_info "Collecting context: git diff, issue details, template structure..."
+    
+    # Get git diff from main branch
+    local git_diff
+    local main_branch="main"
+    if ! git show-ref --verify --quiet refs/heads/main; then
+        main_branch="master"
+    fi
+    git_diff=$(git diff "${main_branch}...HEAD" 2>/dev/null || echo "No diff available")
+    
+    # Get issue details if in implement mode
+    local issue_details=""
+    if [ "$mode" = "implement" ] && [ -n "$issue_number" ]; then
+        issue_details=$(gh issue view "$issue_number" --json body,title,labels 2>/dev/null || echo '{"title":"Issue not found","body":"","labels":[]}')
+    fi
+    
+    # Get Claude's analysis
+    local claude_analysis
+    claude_analysis=$(cat "$claude_output_file" 2>/dev/null || echo "No analysis available")
+    
+    # Get PR template structure if available
+    local template_content=""
+    local template_file
+    if template_file=$(detect_pr_template); then
+        template_content=$(cat "$template_file" 2>/dev/null || echo "")
+    fi
+    
+    # Get repository context (recent commits for style reference)
+    local recent_commits
+    recent_commits=$(git log --oneline -5 2>/dev/null || echo "No commit history available")
+    
+    # Check if llm tool is available and functional
+    if ! command -v llm >/dev/null 2>&1; then
+        log_warning "LLM tool not available, falling back to traditional merge"
+        merge_with_pr_template_fallback "$claude_output_file" "$issue_number" "$mode"
+        return $?
+    fi
+    
+    # Create comprehensive LLM prompt
+    log_info "Synthesizing intelligent PR body with LLM..."
+    
+    # Use llm to generate intelligent PR body
+    cat > "$output_file" << 'EOF'
+# LLM PROMPT FOR INTELLIGENT PR BODY GENERATION
+
+You are an expert software engineer creating an exceptional GitHub Pull Request description. You have access to:
+
+1. **Git Diff**: The actual code changes made
+2. **Original Issue**: The problem being solved  
+3. **Implementation Analysis**: Claude's technical analysis of what was accomplished
+4. **PR Template**: The expected structure and sections
+5. **Repository Context**: Recent commit patterns for style consistency
+
+## Your Task:
+Create a comprehensive, professional PR body that:
+
+**FOLLOWS TEMPLATE STRUCTURE** but goes beyond it when beneficial
+**SYNTHESIZES ALL CONTEXT** into a cohesive narrative  
+**HIGHLIGHTS KEY TECHNICAL DETAILS** that matter for review
+**INCLUDES IMPLEMENTATION APPROACH** based on actual code changes
+**ADDRESSES TESTING & SECURITY** implications when relevant
+**MAINTAINS PROFESSIONAL TONE** consistent with repository style
+
+## Key Guidelines:
+- Use the template sections as your foundation
+- Extract meaningful implementation details from the diff
+- Synthesize Claude's analysis with actual changes  
+- Include technical considerations beyond template requirements
+- Ensure accuracy - only claim what was actually implemented
+- Make it reviewer-friendly with clear structure and actionable information
+- Include any breaking changes, migration notes, or special considerations
+
+## Output Format:
+Generate ONLY the final PR body markdown - no explanations or meta-commentary.
+
+EOF
+    
+    # Add context data to the prompt
+    cat >> "$output_file" << EOF
+
+## CONTEXT DATA:
+
+### Git Diff:
+\`\`\`diff
+$git_diff
+\`\`\`
+
+### Issue Details:
+\`\`\`json
+$issue_details
+\`\`\`
+
+### Claude's Implementation Analysis:
+\`\`\`
+$claude_analysis
+\`\`\`
+
+### PR Template Structure:
+\`\`\`markdown
+$template_content
+\`\`\`
+
+### Recent Commits (for style reference):
+\`\`\`
+$recent_commits
+\`\`\`
+
+### Mode: $mode
+### Issue Number: $issue_number
+
+---
+
+Generate the intelligent PR body now:
+EOF
+    
+    # Generate the intelligent PR body using llm
+    local intelligent_body
+    intelligent_body=$(llm prompt -f "$output_file" 2>/dev/null)
+    
+    if [ -z "$intelligent_body" ] || [ "$intelligent_body" = "null" ]; then
+        log_warning "LLM generation failed, falling back to traditional merge"
+        rm -f "$output_file" 2>/dev/null
+        merge_with_pr_template_fallback "$claude_output_file" "$issue_number" "$mode"
+        return $?
+    fi
+    
+    # Write the intelligent output to the file
+    echo "$intelligent_body" > "$output_file"
+    
+    # Validate output was created successfully
+    if [ ! -s "$output_file" ]; then
+        log_error "Failed to generate intelligent PR body"
+        rm -f "$output_file" 2>/dev/null
+        return 1
+    fi
+    
+    log_success "Generated intelligent PR body: $output_file"
+    echo "$output_file"
+}
+
+# Fallback to traditional template merging (when LLM fails)
+merge_with_pr_template_fallback() {
     local claude_output_file="$1"
     local issue_number="$2"
     local mode="$3"
@@ -481,7 +642,7 @@ ensure_pr() {
     
     # Merge Claude's output with PR template if available
     local final_body_file
-    final_body_file=$(merge_with_pr_template "$body_file" "$number" "$mode")
+    final_body_file=$(generate_intelligent_pr_body "$body_file" "$number" "$mode")
     log_info "Using body file: ${final_body_file}"
     
     # Check if PR already exists for this branch
