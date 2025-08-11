@@ -199,9 +199,31 @@ export CLAUDE_TASKER_DEBUG=1
 
 > ⚠️ **Beta Feature**: The following GitHub Actions integration examples are theoretical and have not been fully tested. Use with caution in production environments.
 
-Claude Tools can be integrated into GitHub Actions workflows to automate code reviews and issue implementation. Here's how it could work:
+Claude Tools can be integrated into GitHub Actions workflows to automate code reviews and issue implementation. This requires careful setup of dependencies and authentication.
 
-### Automated PR Reviews
+### Prerequisites & Authentication
+
+1. **GitHub Personal Access Token (PAT)**:
+   - Required because the default `GITHUB_TOKEN` has limitations:
+     - Cannot create PRs that trigger other workflows
+     - Limited cross-repository access
+     - Cannot push to protected branches
+   - Create at: Settings → Developer settings → Personal access tokens
+   - Required scopes: `repo`, `workflow`, `write:packages`
+
+2. **API Keys Required**:
+   - `ANTHROPIC_API_KEY` - For Claude CLI
+   - `OPENAI_API_KEY` - For LLM tool (fallback when Claude CLI unavailable)
+
+3. **Add Secrets to Repository**:
+   ```
+   Settings → Secrets and variables → Actions → New repository secret
+   - ANTHROPIC_API_KEY
+   - OPENAI_API_KEY  
+   - GH_PAT (your Personal Access Token)
+   ```
+
+### Complete PR Review Workflow
 
 Create `.github/workflows/claude-pr-review.yml`:
 
@@ -214,25 +236,60 @@ on:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better context
       
-      - name: Setup Claude Tools
+      - name: Install Dependencies
         run: |
-          # Clone claude-tools to runner
+          # Install jq (JSON processor)
+          sudo apt-get update && sudo apt-get install -y jq
+          
+          # Install Python and pip for LLM tool
+          sudo apt-get install -y python3-pip
+          
+          # Install LLM tool
+          pip install llm
+          
+          # Configure LLM with OpenAI
+          llm keys set openai --key "${{ secrets.OPENAI_API_KEY }}"
+          
+          # Install Claude CLI via npm
+          npm install -g @anthropic-ai/claude-cli
+          
+          # Clone claude-tools
           git clone https://github.com/ShaneGCareCru/claude-tools.git /tmp/claude-tools
           chmod +x /tmp/claude-tools/claude-tasker
+          
+      - name: Configure GitHub CLI
+        run: |
+          # Use PAT instead of default token
+          echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
           
       - name: Run Claude Review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           cd ${{ github.workspace }}
-          /tmp/claude-tools/claude-tasker --review-pr ${{ github.event.pull_request.number }}
+          
+          # Ensure CLAUDE.md exists
+          if [ ! -f "CLAUDE.md" ]; then
+            echo "# Project Context" > CLAUDE.md
+            echo "Repository: ${{ github.repository }}" >> CLAUDE.md
+          fi
+          
+          # Run review with timeout protection
+          timeout 20m /tmp/claude-tools/claude-tasker \
+            --review-pr ${{ github.event.pull_request.number }} \
+            --timeout 30
 ```
 
-### Automated Issue Implementation
+### Complete Issue Implementation Workflow
 
 Create `.github/workflows/claude-issue-implement.yml`:
 
@@ -247,60 +304,121 @@ jobs:
     # Only run on issues labeled 'claude-implement'
     if: contains(github.event.issue.labels.*.name, 'claude-implement')
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}  # Use PAT for push access
+          fetch-depth: 0
       
-      - name: Setup Claude Tools
+      - name: Install Dependencies
         run: |
+          # System dependencies
+          sudo apt-get update && sudo apt-get install -y jq python3-pip
+          
+          # Install and configure LLM tool
+          pip install llm
+          llm keys set openai --key "${{ secrets.OPENAI_API_KEY }}"
+          
+          # Install Claude CLI
+          npm install -g @anthropic-ai/claude-cli
+          
+          # Setup claude-tools
           git clone https://github.com/ShaneGCareCru/claude-tools.git /tmp/claude-tools
           chmod +x /tmp/claude-tools/claude-tasker
           
-      - name: Configure Git
+      - name: Configure Git and GitHub
         run: |
+          # Git configuration
           git config --global user.name "Claude Bot"
           git config --global user.email "claude-bot@users.noreply.github.com"
+          
+          # GitHub CLI with PAT
+          echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
+          
+      - name: Create CLAUDE.md if missing
+        run: |
+          if [ ! -f "CLAUDE.md" ]; then
+            cat > CLAUDE.md << 'EOF'
+          # Project Context for Claude
+          
+          Repository: ${{ github.repository }}
+          
+          ## Guidelines
+          - Follow existing code style and conventions
+          - Write comprehensive tests for new features
+          - Update documentation as needed
+          - Ensure all CI checks pass
+          EOF
+          fi
           
       - name: Implement Issue
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           cd ${{ github.workspace }}
-          /tmp/claude-tools/claude-tasker ${{ github.event.issue.number }}
+          
+          # Run with timeout and error handling
+          timeout 50m /tmp/claude-tools/claude-tasker \
+            ${{ github.event.issue.number }} \
+            --timeout 30 || {
+              echo "Claude implementation failed or timed out"
+              gh issue comment ${{ github.event.issue.number }} \
+                --body "❌ Automated implementation failed. Please check the logs."
+              exit 1
+            }
+            
+      - name: Post Success Comment
+        if: success()
+        run: |
+          gh issue comment ${{ github.event.issue.number }} \
+            --body "✅ Automated implementation completed. Please review the generated PR."
 ```
-
-### Configuration Requirements
-
-1. **Add Anthropic API Key**: 
-   - Go to Settings → Secrets → Actions
-   - Add `ANTHROPIC_API_KEY` with your API key
-
-2. **Permissions**: 
-   - Ensure Actions have write permissions for PRs and issues
-   - Settings → Actions → General → Workflow permissions
-
-3. **Claude CLI Installation**:
-   - The workflow would need to install Claude CLI on the runner
-   - Could be done via npm, homebrew, or direct download
 
 ### Security Considerations
 
-- **API Key Protection**: Never commit API keys; use GitHub Secrets
-- **Rate Limiting**: Implement appropriate delays between API calls
-- **Resource Limits**: Set timeout limits on Actions to prevent runaway costs
-- **Review Output**: Always review Claude's PRs before merging
-- **Selective Triggers**: Use labels or specific conditions to control when automation runs
+1. **Secrets Management**:
+   - Never log or output API keys
+   - Rotate keys regularly
+   - Use environment-specific keys
 
-### Potential Enhancements
+2. **Resource Limits**:
+   - Set `timeout-minutes` on jobs
+   - Use `timeout` command for long-running operations
+   - Monitor Actions usage and costs
 
-- Integrate with Claude's official GitHub App (when available)
-- Add cost tracking and budget limits
-- Implement review approval requirements
-- Add test suite execution before PR creation
-- Use matrix builds for handling multiple issues/PRs
+3. **Access Control**:
+   - Limit PAT scopes to minimum required
+   - Use workflow approval for first-time contributors
+   - Require manual review before merging automated PRs
 
-This integration would enable teams to leverage Claude's capabilities directly in their GitHub workflow, automating routine tasks while maintaining human oversight for critical decisions.
+4. **Cost Management**:
+   ```yaml
+   # Add to workflow for cost awareness
+   - name: Log API Usage Warning
+     run: |
+       echo "⚠️ This workflow uses paid API services (Claude & OpenAI)"
+       echo "Estimated cost per run: $0.10-$0.50 depending on issue complexity"
+   ```
+
+### Troubleshooting
+
+1. **"gh: Forbidden" errors**: Ensure PAT has correct scopes
+2. **"command not found: claude"**: Claude CLI installation failed
+3. **"CLAUDE.md not found"**: The workflow now creates a basic one if missing
+4. **Timeout errors**: Increase `timeout-minutes` or optimize prompts
+
+### Limitations
+
+- Cannot work with private dependencies without additional setup
+- PR creation from forks requires additional permissions
+- Some GitHub API operations may hit rate limits
+- Claude and OpenAI API costs can accumulate quickly
+
+This integration enables powerful automation but requires careful configuration and monitoring to be effective and secure.
 
 ## License
 
