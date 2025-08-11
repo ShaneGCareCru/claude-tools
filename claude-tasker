@@ -469,9 +469,17 @@ EOF
     fi
     
     local output_size=${#intelligent_body}
-    if [ "$output_size" -gt 15000 ]; then
-        log_warning "Generated PR body is quite large (${output_size} characters) - this might cause issues"
-        # Don't fail, just warn - let GitHub handle the limit
+    local github_limit=262144  # GitHub's maximum PR body size in bytes
+    
+    if [ "$output_size" -gt "$github_limit" ]; then
+        log_warning "Generated PR body is too large (${output_size} characters) - truncating to GitHub limit (${github_limit})"
+        intelligent_body="${intelligent_body:0:$github_limit}"
+        # Add truncation notice
+        intelligent_body="${intelligent_body}
+
+[... Content truncated due to GitHub's 262,144 byte limit ...]"
+        echo "$intelligent_body" > "$output_file"
+        output_size=${#intelligent_body}
     fi
     
     # Clean up error log
