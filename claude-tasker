@@ -485,7 +485,7 @@ EOF
     # Clean up error log
     rm -f "$llm_error_log" 2>/dev/null
     
-    log_success "Generated intelligent PR body: $output_file (${output_size} characters)"
+    log_success "Generated intelligent PR body: $output_file (${output_size} characters)" >&2
     echo "$output_file"
 }
 
@@ -2173,10 +2173,10 @@ smart_branch_setup() {
     local number="$1"
     local task_type="$2"
     
-    log_info "=== SMART BRANCH SETUP FOR ${task_type} #${number} ==="
+    log_info "=== SMART BRANCH SETUP FOR ${task_type} #${number} ===" >&2
     
     # Check for existing open PRs for this issue
-    log_info "Checking for existing open PRs for issue #${number}..."
+    log_info "Checking for existing open PRs for issue #${number}..." >&2
     local existing_prs
     existing_prs=$(gh pr list --repo "${REPO_OWNER}/${REPO_NAME}" --search "closes:#${number} OR fixes:#${number} OR issue #${number}" --state open --json number,title,headRefName 2>/dev/null || echo "[]")
     
@@ -2188,13 +2188,13 @@ smart_branch_setup() {
         existing_pr_number=$(echo "$existing_prs" | jq -r '.[0].number' 2>/dev/null)
         
         if [ -n "$existing_branch" ] && [ "$existing_branch" != "null" ]; then
-            log_success "FOUND EXISTING OPEN PR #${existing_pr_number} with branch: ${existing_branch}"
-            log_info "REUSING existing branch instead of creating new one..."
+            log_success "FOUND EXISTING OPEN PR #${existing_pr_number} with branch: ${existing_branch}" >&2
+            log_info "REUSING existing branch instead of creating new one..." >&2
             
             # Fetch the branch from remote
-            log_info "Fetching existing branch from remote..."
+            log_info "Fetching existing branch from remote..." >&2
             git fetch origin "$existing_branch" || {
-                log_warning "Could not fetch branch ${existing_branch}, will create new one"
+                log_warning "Could not fetch branch ${existing_branch}, will create new one" >&2
                 return 1
             }
             
@@ -2211,15 +2211,15 @@ smart_branch_setup() {
                 echo "${existing_branch}|${existing_pr_number}"  # Return branch name and PR number
                 return 0
             else
-                log_warning "Could not checkout existing branch ${existing_branch}, will create new one"
+                log_warning "Could not checkout existing branch ${existing_branch}, will create new one" >&2
                 return 1
             fi
         else
-            log_warning "Could not extract branch name from existing PR, will create new one"
+            log_warning "Could not extract branch name from existing PR, will create new one" >&2
             return 1
         fi
     else
-        log_info "No existing open PRs found for issue #${number}"
+        log_info "No existing open PRs found for issue #${number}" >&2
         return 1  # Signal to create new branch
     fi
 }
