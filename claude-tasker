@@ -631,26 +631,20 @@ issue_comment() {
 }
 
 # Optionally close issue if completely implemented
-maybe_close_issue() {
+# TODO: Implement proper issue closing logic based on PR approval status
+# Issues should only be closed when:
+# 1. PR has been created and merged, OR
+# 2. PR has been reviewed and approved by maintainer
+# Current auto-close logic removed due to false positive issues
+check_pr_approval_and_close_issue() {
     local number="$1"
-    local audit_file="$2"
+    local pr_number="$2"
     
-    # Check if the audit indicates completion
-    if grep -q -i "NOW 100% Complete\|Fully Complete\|Implementation Complete\|Status.*Complete" "$audit_file"; then
-        log_info "Detected completion indicators, attempting to close issue #${number}..."
-        
-        local pr_number
-        pr_number=$(gh pr view --repo "${REPO_OWNER}/${REPO_NAME}" --json number -q .number 2>/dev/null || echo "unknown")
-        
-        if gh issue close "$number" --repo "${REPO_OWNER}/${REPO_NAME}" \
-                        --comment "✅ Automated implementation complete. See PR #${pr_number} for details." 2>/dev/null; then
-            log_success "Issue #${number} closed automatically"
-        else
-            log_info "Could not auto-close issue #${number} (may already be closed or lack permissions)"
-        fi
-    else
-        log_info "No completion indicators found, leaving issue #${number} open"
-    fi
+    # TODO: Implement logic to check PR approval status via GitHub API
+    # gh pr view $pr_number --json reviewDecision,mergeStateStatus
+    # Only close issue if PR is approved/merged
+    log_info "TODO: Check PR #${pr_number} approval status before closing issue #${number}"
+    log_info "For now, leaving issue #${number} open for manual review"
 }
 
 # Execute Claude with retry logic for rate limiting
@@ -1446,7 +1440,7 @@ You are **Lyra-Dev**, an elite AI prompt optimizer embedded in a dev workflow. Y
 
 You never ask questions. Instead, you **reason through missing details**, assume safe defaults, and state those assumptions in the output. Your prompts must always be actionable, context-aware, and structured.
 
-**CRITICAL**: Generate CONCISE prompts (under 3000 characters when possible) that are clear and actionable. Avoid excessive repetition or verbose instructions.
+**CRITICAL**: Generate COMPREHENSIVE yet CONCISE prompts that include all important details and are clear and actionable. Focus on essential information while avoiding excessive repetition or unnecessarily verbose instructions.
 
 ---
 
@@ -2522,15 +2516,49 @@ process_single_task() {
         # Implementation mode: post audit comment on issue
         issue_comment "$number" "$output_file" "$mode"
         
-        # Check for changes and create PRs
-        if git diff --quiet; then
-            log_success "Audit found no code changes needed – issue appears complete"
-            # Optional: auto-close the issue if it appears complete
-            maybe_close_issue "$number" "$output_file"
+        # Enhanced change detection with debugging
+        log_info "Checking for changes..."
+        
+        local has_uncommitted_changes=false
+        local has_branch_commits=false
+        local current_branch=$(git branch --show-current)
+        
+        # Check for uncommitted changes
+        if ! git diff --quiet; then
+            has_uncommitted_changes=true
+            log_info "Found uncommitted changes in working directory"
+        else
+            log_info "No uncommitted changes found"
+        fi
+        
+        # Check for commits on current branch vs main/master
+        local main_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+        local commit_count=$(git rev-list --count HEAD ^origin/$main_branch 2>/dev/null || echo "0")
+        
+        if [ "$commit_count" -gt 0 ]; then
+            has_branch_commits=true
+            log_info "Found $commit_count commits on branch '$current_branch' vs '$main_branch'"
+            log_info "Recent commits:"
+            git log --oneline -n 3 HEAD ^origin/$main_branch 2>/dev/null || log_info "Could not show recent commits"
+        else
+            log_info "No commits found on current branch vs $main_branch"
+        fi
+        
+        # Determine next action based on detected changes
+        if [ "$has_uncommitted_changes" = false ] && [ "$has_branch_commits" = false ]; then
+            log_info "No implementation work performed by Claude"
+            log_info "This could indicate: issue already resolved, no work needed, or implementation error"
+            log_info "Leaving issue #${number} open for manual review"
             return 0
         fi
+        
+        # We have either uncommitted changes or branch commits - proceed with workflow
+        if [ "$has_branch_commits" = true ] && [ "$has_uncommitted_changes" = false ]; then
+            log_info "Found existing commits - will create/update PR with existing work"
+        fi
 
-        log_info "Code changes detected, proceeding with commit and PR creation..."
+        log_info "Changes detected, proceeding with commit and PR creation..."
+        log_info "Change summary: uncommitted=$has_uncommitted_changes, branch_commits=$has_branch_commits"
 
         # Always commit and push changes (we know changes exist at this point)
         if ! commit_and_push "$branch_name" "$number" "$mode"; then
