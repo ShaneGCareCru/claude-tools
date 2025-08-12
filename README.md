@@ -25,9 +25,9 @@ Claude Tools provides a sophisticated task automation system that bridges Claude
 - **macOS** or **Linux** (bash 4.0+)
 - **GitHub CLI (`gh`)** - Authenticated with your GitHub account
 - **jq** - JSON processor
-- **Claude CLI** - For execution mode (optional for prompt-only mode)
+- **Claude CLI** - For execution mode 
 - **git** - Version control
-- **llm** (optional) - Falls back to Claude if not available
+- **llm** - configured with OpenAI model
 
 ### Quick Start
 
