@@ -1,451 +1,427 @@
-"""Core workflow logic and orchestration for claude-tasker execution."""
-import json
-import subprocess
-import tempfile
+"""Core workflow orchestration module for claude-tasker."""
+
 import time
-from pathlib import Path
+import os
 from typing import Dict, List, Optional, Any, Tuple
+from pathlib import Path
+from dataclasses import dataclass
+
+from .environment_validator import EnvironmentValidator
+from .github_client import GitHubClient, IssueData, PRData
+from .workspace_manager import WorkspaceManager
+from .prompt_builder import PromptBuilder
 from .pr_body_generator import PRBodyGenerator
 
 
+@dataclass
+class WorkflowResult:
+    """Result of workflow execution."""
+    success: bool
+    message: str
+    issue_number: Optional[int] = None
+    pr_url: Optional[str] = None
+    branch_name: Optional[str] = None
+    error_details: Optional[str] = None
+
+
 class WorkflowLogic:
-    """Orchestrates claude-tasker execution workflow with agent coordination."""
+    """Core workflow orchestration for claude-tasker operations."""
     
-    def __init__(self, repo_path: Optional[Path] = None):
-        """Initialize workflow logic.
+    def __init__(self, 
+                 timeout_between_tasks: float = 10.0,
+                 interactive_mode: bool = None,
+                 coder: str = "claude",
+                 base_branch: str = "main"):
+        self.timeout_between_tasks = timeout_between_tasks
+        self.interactive_mode = interactive_mode if interactive_mode is not None else os.isatty(0)
+        self.coder = coder
+        self.base_branch = base_branch
         
-        Args:
-            repo_path: Path to git repository. Defaults to current directory.
-        """
-        self.repo_path = repo_path or Path.cwd()
-        self.agents_dir = self.repo_path / ".claude" / "agents"
-        self.pr_body_generator = PRBodyGenerator(repo_path)
+        # Initialize components
+        self.env_validator = EnvironmentValidator()
+        self.github_client = GitHubClient()
+        self.workspace_manager = WorkspaceManager()
+        self.prompt_builder = PromptBuilder()
+        self.pr_body_generator = PRBodyGenerator()
         
-    def execute_two_stage_workflow(self, issue_number: str, mode: str = "issue") -> Dict[str, Any]:
-        """Execute two-stage workflow: meta-prompt generation → Claude execution.
-        
-        Args:
-            issue_number: GitHub issue number
-            mode: Execution mode ('issue', 'pr-review', 'bug')
-            
-        Returns:
-            Dictionary containing workflow results
-        """
-        # Stage 1: Meta-prompt generation
-        meta_prompt = self.generate_meta_prompt(issue_number, mode)
-        
-        # Stage 2: Claude execution with optimized prompt
-        result = self.execute_with_claude(meta_prompt, issue_number)
-        
-        return {
-            "meta_prompt": meta_prompt,
-            "execution_result": result,
-            "mode": mode,
-            "issue_number": issue_number
-        }
+        # Load project context
+        self.claude_md_content = self._load_claude_md()
     
-    def generate_meta_prompt(self, issue_number: str, mode: str) -> Dict[str, Any]:
-        """Generate meta-prompt for optimized Claude execution.
-        
-        Args:
-            issue_number: GitHub issue number
-            mode: Execution mode
-            
-        Returns:
-            Meta-prompt structure
-        """
-        # Get issue context
-        issue_context = self._get_issue_context(issue_number)
-        
-        # Select appropriate agent
-        agent_content = self._select_agent(mode)
-        
-        # Build meta-prompt
-        meta_prompt = {
-            "mode": mode,
-            "issue_number": issue_number,
-            "issue_context": issue_context,
-            "agent": agent_content,
-            "framework": "lyra-dev-4d",
-            "instructions": self._build_4d_instructions()
-        }
-        
-        return meta_prompt
-    
-    def execute_with_claude(self, meta_prompt: Dict[str, Any], issue_number: str) -> Dict[str, Any]:
-        """Execute Claude with optimized prompt from meta-prompt stage.
-        
-        Args:
-            meta_prompt: Generated meta-prompt structure
-            issue_number: GitHub issue number
-            
-        Returns:
-            Claude execution results
-        """
-        try:
-            # Create temporary prompt file
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                json.dump(meta_prompt, f, indent=2)
-                prompt_file = f.name
-            
-            # Execute Claude with JSON prompt
-            result = subprocess.run(
-                ["claude", "--input", prompt_file, "--output-format", "json"],
-                capture_output=True,
-                text=True,
-                cwd=self.repo_path
-            )
-            
-            # Clean up
-            Path(prompt_file).unlink(missing_ok=True)
-            
-            if result.returncode == 0:
-                try:
-                    return json.loads(result.stdout)
-                except json.JSONDecodeError:
-                    return {"raw_output": result.stdout, "error": "Invalid JSON response"}
-            else:
-                return {"error": result.stderr, "returncode": result.returncode}
-                
-        except Exception as e:
-            return {"error": str(e), "stage": "claude_execution"}
-    
-    def _get_issue_context(self, issue_number: str) -> Dict[str, Any]:
-        """Get GitHub issue context.
-        
-        Args:
-            issue_number: GitHub issue number
-            
-        Returns:
-            Issue context dictionary
-        """
-        try:
-            result = subprocess.run(
-                ["gh", "issue", "view", issue_number, "--json", "title,body,labels,assignees"],
-                capture_output=True,
-                text=True,
-                cwd=self.repo_path
-            )
-            
-            if result.returncode == 0:
-                return json.loads(result.stdout)
-            
-        except Exception:
-            pass
-        
-        return {
-            "title": "Unknown Issue",
-            "body": "Unable to fetch issue details",
-            "labels": [],
-            "assignees": []
-        }
-    
-    def _select_agent(self, mode: str) -> Optional[str]:
-        """Select appropriate agent based on execution mode.
-        
-        Args:
-            mode: Execution mode
-            
-        Returns:
-            Agent content or None if not found
-        """
-        agent_map = {
-            "issue": "github-issue-implementer.md",
-            "pr-review": "pr-reviewer.md",
-            "bug": "bug-analyzer.md"
-        }
-        
-        if not self.agents_dir.exists():
-            return None
-        
-        agent_file = agent_map.get(mode)
-        if not agent_file:
-            return None
-        
-        agent_path = self.agents_dir / agent_file
-        if agent_path.exists():
+    def _load_claude_md(self) -> str:
+        """Load CLAUDE.md content for project context."""
+        claude_md_path = Path("CLAUDE.md")
+        if claude_md_path.exists():
             try:
-                return agent_path.read_text(encoding='utf-8')
+                return claude_md_path.read_text(encoding='utf-8')
             except Exception:
-                pass
-        
-        return None
+                return ""
+        return ""
     
-    def _build_4d_instructions(self) -> Dict[str, str]:
-        """Build Lyra-Dev 4-D methodology instructions.
+    def validate_environment(self, prompt_only: bool = False) -> Tuple[bool, str]:
+        """Validate environment before execution."""
+        validation_results = self.env_validator.validate_all_dependencies(prompt_only=prompt_only)
         
-        Returns:
-            4-D framework instructions
-        """
-        return {
-            "DECONSTRUCT": "Analyze the task requirements and current codebase state",
-            "DIAGNOSE": "Identify gaps between claimed and actual implementation status",
-            "DEVELOP": "Create step-by-step implementation plan",
-            "DELIVER": "Implement the solution with proper testing and documentation"
-        }
+        if not validation_results['valid']:
+            report = self.env_validator.format_validation_report(validation_results)
+            return False, report
+        
+        return True, "Environment validation passed"
     
-    def verify_completion_status(self, issue_number: str) -> Dict[str, Any]:
-        """Implement status verification protocol to detect false completion claims.
-        
-        Args:
-            issue_number: GitHub issue number
-            
-        Returns:
-            Status verification results
-        """
-        # Get current issue status
-        issue_context = self._get_issue_context(issue_number)
-        
-        # Check for completion indicators
-        title = issue_context.get("title", "").lower()
-        body = issue_context.get("body", "").lower()
-        labels = [label.get("name", "").lower() for label in issue_context.get("labels", [])]
-        
-        completion_indicators = [
-            "completed" in title,
-            "done" in title,
-            "completed" in body,
-            "completed" in labels,
-            "done" in labels
-        ]
-        
-        claims_completion = any(completion_indicators)
-        
-        # Verify against actual implementation
-        # This would need integration with actual verification logic
-        verification_result = {
-            "issue_number": issue_number,
-            "claims_completion": claims_completion,
-            "title_indicates_completion": "completed" in title or "done" in title,
-            "labels_indicate_completion": "completed" in labels or "done" in labels,
-            "verification_needed": claims_completion
-        }
-        
-        return verification_result
-    
-    def execute_audit_and_implement(self, issue_number: str) -> Dict[str, Any]:
-        """Execute AUDIT-AND-IMPLEMENT workflow.
-        
-        Args:
-            issue_number: GitHub issue number
-            
-        Returns:
-            Audit and implementation results
-        """
-        results = {}
-        
-        # Audit phase
-        audit_prompt = self._build_audit_prompt(issue_number)
-        audit_result = self._execute_claude_command(audit_prompt, "audit")
-        results["audit"] = audit_result
-        
-        # Implementation phase (if audit reveals gaps)
-        if audit_result.get("gaps_found", True):
-            impl_prompt = self._build_implementation_prompt(issue_number, audit_result)
-            impl_result = self._execute_claude_command(impl_prompt, "implement")
-            results["implementation"] = impl_result
-        
-        return results
-    
-    def _build_audit_prompt(self, issue_number: str) -> str:
-        """Build audit phase prompt.
-        
-        Args:
-            issue_number: GitHub issue number
-            
-        Returns:
-            Audit prompt string
-        """
-        issue_context = self._get_issue_context(issue_number)
-        
-        return f"""AUDIT PHASE - Issue #{issue_number}
-
-Issue: {issue_context.get('title', 'Unknown')}
-Description: {issue_context.get('body', 'No description')}
-
-Please audit the current implementation status:
-1. What has been claimed as completed?
-2. What evidence exists in the codebase?
-3. What gaps exist between claims and reality?
-4. What work remains to be done?
-
-Provide a structured audit report."""
-    
-    def _build_implementation_prompt(self, issue_number: str, audit_result: Dict[str, Any]) -> str:
-        """Build implementation phase prompt.
-        
-        Args:
-            issue_number: GitHub issue number
-            audit_result: Results from audit phase
-            
-        Returns:
-            Implementation prompt string
-        """
-        return f"""IMPLEMENTATION PHASE - Issue #{issue_number}
-
-Based on audit findings: {audit_result.get('raw_output', 'Audit completed')}
-
-Please implement the identified missing components:
-1. Address each gap identified in the audit
-2. Follow TDD approach where tests exist
-3. Maintain existing code conventions
-4. Provide working, tested implementations
-
-Focus only on filling the gaps, not duplicating existing work."""
-    
-    def _execute_claude_command(self, prompt: str, phase: str) -> Dict[str, Any]:
-        """Execute Claude command for specific phase.
-        
-        Args:
-            prompt: Prompt content
-            phase: Execution phase name
-            
-        Returns:
-            Execution results
-        """
+    def process_single_issue(self, issue_number: int, prompt_only: bool = False,
+                           project_number: Optional[int] = None) -> WorkflowResult:
+        """Process a single GitHub issue using the audit-and-implement workflow."""
         try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(prompt)
-                temp_file = f.name
+            # Validate environment
+            env_valid, env_msg = self.validate_environment(prompt_only)
+            if not env_valid:
+                return WorkflowResult(
+                    success=False,
+                    message="Environment validation failed",
+                    error_details=env_msg
+                )
             
-            result = subprocess.run(
-                ["claude", "--input", temp_file],
-                capture_output=True,
-                text=True,
-                cwd=self.repo_path
+            # Fetch issue data
+            issue_data = self.github_client.get_issue(issue_number)
+            if not issue_data:
+                return WorkflowResult(
+                    success=False,
+                    message=f"Failed to fetch issue #{issue_number}",
+                    issue_number=issue_number
+                )
+            
+            # Check if issue is already closed
+            if issue_data.state.lower() == 'closed':
+                return WorkflowResult(
+                    success=True,
+                    message=f"Issue #{issue_number} already closed",
+                    issue_number=issue_number
+                )
+            
+            # Get project context if specified
+            project_context = {}
+            if project_number:
+                project_info = self.github_client.get_project_info(project_number)
+                if project_info:
+                    project_context['project_info'] = project_info
+            
+            # Perform workspace hygiene
+            if not self.workspace_manager.workspace_hygiene():
+                return WorkflowResult(
+                    success=False,
+                    message="Workspace hygiene failed or cancelled by user",
+                    issue_number=issue_number
+                )
+            
+            # Create timestamped branch
+            branch_created, branch_name = self.workspace_manager.create_timestamped_branch(
+                issue_number, self.base_branch
+            )
+            if not branch_created:
+                return WorkflowResult(
+                    success=False,
+                    message=f"Failed to create branch: {branch_name}",
+                    issue_number=issue_number
+                )
+            
+            # Build context for prompt generation
+            context = {
+                'git_diff': self.workspace_manager.get_git_diff(),
+                **project_context
+            }
+            
+            # Generate and execute prompt using two-stage execution
+            task_data = {
+                'issue_number': issue_number,
+                'issue_title': issue_data.title,
+                'issue_body': issue_data.body,
+                'issue_labels': issue_data.labels,
+                'branch_name': branch_name
+            }
+            
+            prompt_result = self.prompt_builder.execute_two_stage_prompt(
+                task_type="issue_implementation",
+                task_data=task_data,
+                claude_md_content=self.claude_md_content,
+                prompt_only=prompt_only
             )
             
-            Path(temp_file).unlink(missing_ok=True)
+            if not prompt_result['success']:
+                return WorkflowResult(
+                    success=False,
+                    message="Prompt generation failed",
+                    issue_number=issue_number,
+                    branch_name=branch_name,
+                    error_details=prompt_result.get('error')
+                )
             
-            return {
-                "phase": phase,
-                "returncode": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "success": result.returncode == 0
-            }
+            # If prompt-only mode, return success
+            if prompt_only:
+                return WorkflowResult(
+                    success=True,
+                    message=f"Prompt generated for issue #{issue_number}",
+                    issue_number=issue_number,
+                    branch_name=branch_name
+                )
             
-        except Exception as e:
-            return {
-                "phase": phase,
-                "error": str(e),
-                "success": False
-            }
-    
-    def process_issue_range(self, start: int, end: int, timeout: int = 10, prompt_only: bool = False) -> List[Dict[str, Any]]:
-        """Process a range of GitHub issues.
-        
-        Args:
-            start: Start issue number
-            end: End issue number  
-            timeout: Delay between issues in seconds
-            prompt_only: Only generate prompts, don't execute
-            
-        Returns:
-            List of processing results
-        """
-        results = []
-        
-        for issue_num in range(start, end + 1):
-            issue_number = str(issue_num)
-            
-            try:
-                if prompt_only:
-                    # Generate meta-prompt only
-                    meta_prompt = self.generate_meta_prompt(issue_number, "issue")
-                    results.append({
-                        "issue_number": issue_number,
-                        "meta_prompt": meta_prompt,
-                        "mode": "prompt_only"
-                    })
-                else:
-                    # Full execution
-                    result = self.execute_two_stage_workflow(issue_number, "issue")
-                    results.append(result)
+            # Check if there are changes to commit
+            if self.workspace_manager.has_changes_to_commit():
+                # Commit changes
+                commit_msg = f"automated implementation via agent coordination"
+                if not self.workspace_manager.commit_changes(commit_msg, branch_name):
+                    return WorkflowResult(
+                        success=False,
+                        message="Failed to commit changes",
+                        issue_number=issue_number,
+                        branch_name=branch_name
+                    )
                 
-                # Delay between issues
-                if issue_num < end:
-                    time.sleep(timeout)
-                    
-            except Exception as e:
-                results.append({
-                    "issue_number": issue_number,
-                    "error": str(e),
-                    "success": False
-                })
-        
-        return results
-    
-    def create_timestamped_branch(self, issue_number: str) -> Dict[str, Any]:
-        """Create timestamped branch for issue.
-        
-        Args:
-            issue_number: GitHub issue number
-            
-        Returns:
-            Branch creation results
-        """
-        timestamp = str(int(time.time()))
-        branch_name = f"issue-{issue_number}-{timestamp}"
-        
-        try:
-            result = subprocess.run(
-                ["git", "checkout", "-b", branch_name],
-                capture_output=True,
-                text=True,
-                cwd=self.repo_path
-            )
-            
-            return {
-                "branch_name": branch_name,
-                "success": result.returncode == 0,
-                "output": result.stdout,
-                "error": result.stderr
-            }
-            
-        except Exception as e:
-            return {
-                "branch_name": branch_name,
-                "success": False,
-                "error": str(e)
-            }
-    
-    def handle_exponential_backoff(self, command: List[str], max_retries: int = 3) -> subprocess.CompletedProcess:
-        """Handle API rate limits with exponential backoff.
-        
-        Args:
-            command: Command to execute
-            max_retries: Maximum number of retries
-            
-        Returns:
-            Final command result
-        """
-        for attempt in range(max_retries + 1):
-            try:
-                result = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    cwd=self.repo_path
+                # Push branch
+                if not self.workspace_manager.push_branch(branch_name):
+                    return WorkflowResult(
+                        success=False,
+                        message="Failed to push branch",
+                        issue_number=issue_number,
+                        branch_name=branch_name
+                    )
+                
+                # Generate PR body
+                git_diff = self.workspace_manager.get_git_diff(self.base_branch)
+                commit_log = self.workspace_manager.get_commit_log(self.base_branch)
+                
+                pr_body = self.pr_body_generator.generate_pr_body(
+                    issue_data, git_diff, branch_name, commit_log
                 )
                 
-                # Check for rate limit in stderr
-                if result.stderr and "rate limit" in result.stderr.lower():
-                    if attempt < max_retries:
-                        # Exponential backoff: 2^attempt seconds
-                        wait_time = 2 ** attempt
-                        time.sleep(wait_time)
-                        continue
+                # Create PR
+                pr_title = f"Fix #{issue_number}: {issue_data.title}"
+                pr_url = self.github_client.create_pr(
+                    title=pr_title,
+                    body=pr_body,
+                    head=branch_name,
+                    base=self.base_branch
+                )
                 
-                return result
-                
-            except Exception as e:
-                if attempt == max_retries:
-                    # Return a failed result
-                    return subprocess.CompletedProcess(
-                        command, 1, "", str(e)
+                if pr_url:
+                    # Comment on issue with audit results and PR link
+                    audit_comment = f"""## 🤖 Automated Implementation Complete
+
+**Audit Results:**
+- Issue analysis completed using Lyra-Dev 4-D methodology
+- Implementation gaps identified and addressed
+- Code changes committed to branch `{branch_name}`
+
+**Pull Request:** {pr_url}
+
+The implementation has been completed and is ready for review.
+
+🤖 Generated via agent coordination with [Claude Code](https://claude.ai/code)"""
+                    
+                    self.github_client.comment_on_issue(issue_number, audit_comment)
+                    
+                    return WorkflowResult(
+                        success=True,
+                        message=f"Issue #{issue_number} implemented successfully",
+                        issue_number=issue_number,
+                        pr_url=pr_url,
+                        branch_name=branch_name
                     )
-                time.sleep(2 ** attempt)
+                else:
+                    return WorkflowResult(
+                        success=False,
+                        message="Failed to create PR",
+                        issue_number=issue_number,
+                        branch_name=branch_name
+                    )
+            else:
+                # No changes made - issue might already be complete
+                # Comment on issue explaining the situation
+                no_changes_comment = f"""## 🤖 Automated Analysis Complete
+
+**Audit Results:**
+- Issue was analyzed using Lyra-Dev 4-D methodology
+- No implementation gaps were identified
+- Issue appears to already be complete or no code changes are required
+
+The issue has been reviewed and no further action is needed at this time.
+
+🤖 Generated via agent coordination with [Claude Code](https://claude.ai/code)"""
+                
+                self.github_client.comment_on_issue(issue_number, no_changes_comment)
+                
+                return WorkflowResult(
+                    success=True,
+                    message=f"Issue #{issue_number} already complete - no changes needed",
+                    issue_number=issue_number,
+                    branch_name=branch_name
+                )
         
-        # Should not reach here, but return failed result as fallback
-        return subprocess.CompletedProcess(command, 1, "", "Max retries exceeded")
+        except Exception as e:
+            return WorkflowResult(
+                success=False,
+                message=f"Unexpected error processing issue #{issue_number}",
+                issue_number=issue_number,
+                error_details=str(e)
+            )
+    
+    def process_issue_range(self, start_issue: int, end_issue: int, 
+                           prompt_only: bool = False,
+                           project_number: Optional[int] = None) -> List[WorkflowResult]:
+        """Process a range of GitHub issues."""
+        results = []
+        
+        for issue_number in range(start_issue, end_issue + 1):
+            print(f"\n🔄 Processing issue #{issue_number}...")
+            
+            result = self.process_single_issue(
+                issue_number, prompt_only, project_number
+            )
+            results.append(result)
+            
+            print(f"✅ Issue #{issue_number}: {result.message}")
+            
+            # Apply timeout between issues (except for last one)
+            if issue_number < end_issue and self.timeout_between_tasks > 0:
+                print(f"⏳ Waiting {self.timeout_between_tasks} seconds...")
+                time.sleep(self.timeout_between_tasks)
+        
+        return results
+    
+    def review_pr(self, pr_number: int, prompt_only: bool = False) -> WorkflowResult:
+        """Conduct comprehensive PR review."""
+        try:
+            # Validate environment
+            env_valid, env_msg = self.validate_environment(prompt_only)
+            if not env_valid:
+                return WorkflowResult(
+                    success=False,
+                    message="Environment validation failed",
+                    error_details=env_msg
+                )
+            
+            # Fetch PR data
+            pr_data = self.github_client.get_pr(pr_number)
+            if not pr_data:
+                return WorkflowResult(
+                    success=False,
+                    message=f"Failed to fetch PR #{pr_number}"
+                )
+            
+            # Get PR diff
+            pr_diff = self.github_client.get_pr_diff(pr_number)
+            if not pr_diff:
+                return WorkflowResult(
+                    success=False,
+                    message=f"Failed to fetch diff for PR #{pr_number}"
+                )
+            
+            # Generate review prompt
+            review_prompt = self.prompt_builder.generate_pr_review_prompt(
+                pr_data, pr_diff, self.claude_md_content
+            )
+            
+            # Execute review (using claude directly for reviews)
+            review_result = self.prompt_builder.build_with_claude(review_prompt)
+            
+            if not review_result:
+                return WorkflowResult(
+                    success=False,
+                    message=f"Failed to generate review for PR #{pr_number}"
+                )
+            
+            # If not prompt-only, post review comment
+            if not prompt_only:
+                review_comment = f"""## 🤖 Automated Code Review
+
+{review_result.get('response', 'Review completed')}
+
+---
+🤖 Generated via automated review with [Claude Code](https://claude.ai/code)"""
+                
+                if self.github_client.comment_on_pr(pr_number, review_comment):
+                    return WorkflowResult(
+                        success=True,
+                        message=f"PR #{pr_number} reviewed successfully"
+                    )
+                else:
+                    return WorkflowResult(
+                        success=False,
+                        message=f"Failed to post review comment on PR #{pr_number}"
+                    )
+            else:
+                return WorkflowResult(
+                    success=True,
+                    message=f"Review generated for PR #{pr_number}"
+                )
+        
+        except Exception as e:
+            return WorkflowResult(
+                success=False,
+                message=f"Unexpected error reviewing PR #{pr_number}",
+                error_details=str(e)
+            )
+    
+    def analyze_bug(self, bug_description: str, prompt_only: bool = False) -> WorkflowResult:
+        """Analyze bug and create GitHub issue."""
+        try:
+            # Validate environment
+            env_valid, env_msg = self.validate_environment(prompt_only)
+            if not env_valid:
+                return WorkflowResult(
+                    success=False,
+                    message="Environment validation failed",
+                    error_details=env_msg
+                )
+            
+            # Gather context
+            context = {
+                'recent_commits': self.workspace_manager.get_commit_log(self.base_branch, 5),
+                'git_diff': self.workspace_manager.get_git_diff()
+            }
+            
+            # Generate bug analysis prompt
+            analysis_prompt = self.prompt_builder.generate_bug_analysis_prompt(
+                bug_description, self.claude_md_content, context
+            )
+            
+            # Execute analysis
+            analysis_result = self.prompt_builder.build_with_claude(analysis_prompt)
+            
+            if not analysis_result:
+                return WorkflowResult(
+                    success=False,
+                    message="Failed to analyze bug"
+                )
+            
+            # If not prompt-only, create GitHub issue
+            if not prompt_only:
+                issue_title = f"Bug: {bug_description[:50]}..."
+                issue_body = analysis_result.get('response', bug_description)
+                
+                issue_url = self.github_client.create_issue(
+                    title=issue_title,
+                    body=issue_body,
+                    labels=['bug']
+                )
+                
+                if issue_url:
+                    return WorkflowResult(
+                        success=True,
+                        message=f"Bug analysis completed and issue created: {issue_url}"
+                    )
+                else:
+                    return WorkflowResult(
+                        success=False,
+                        message="Failed to create GitHub issue"
+                    )
+            else:
+                return WorkflowResult(
+                    success=True,
+                    message="Bug analysis completed"
+                )
+        
+        except Exception as e:
+            return WorkflowResult(
+                success=False,
+                message="Unexpected error during bug analysis",
+                error_details=str(e)
+            )
