@@ -189,7 +189,9 @@ class TestArgumentParsing:
             )
         
         assert result.returncode != 0
-        assert "Invalid argument" in result.stderr
+        # Match actual bash script error message from line 1422
+        assert "Invalid argument: invalid-arg" in result.stderr
+        assert "expected: number, range, --review-pr, or --bug" in result.stderr
     
     def test_conflicting_flags_review_pr_and_issue(self, claude_tasker_script, mock_git_repo):
         """Test conflicting flags: --review-pr with issue number."""
@@ -202,7 +204,8 @@ class TestArgumentParsing:
             )
         
         assert result.returncode != 0
-        assert "Cannot specify both --review-pr and issue number" in result.stderr
+        # Match exact bash script error message from line 1322
+        assert "Cannot specify both --review-pr and issue number/range" in result.stderr
     
     def test_conflicting_flags_bug_and_issue(self, claude_tasker_script, mock_git_repo):
         """Test conflicting flags: --bug with issue number."""
@@ -215,7 +218,8 @@ class TestArgumentParsing:
             )
         
         assert result.returncode != 0
-        assert "Cannot specify both --bug and other modes" in result.stderr
+        # Match exact bash script error message from line 1415  
+        assert "Cannot specify both issue number/range and other modes" in result.stderr
     
     def test_invalid_coder_option(self, claude_tasker_script, mock_git_repo):
         """Test invalid coder option."""
