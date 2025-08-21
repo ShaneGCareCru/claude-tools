@@ -15,6 +15,10 @@ class TestEnvironmentValidation:
                 cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
                 if 'command -v gh' in cmd:
                     return Mock(returncode=1, stdout="", stderr="gh: command not found")
+                elif 'git rev-parse --git-dir' in cmd:
+                    return Mock(returncode=0, stdout=".git", stderr="")
+                elif 'git config --get remote.origin.url' in cmd:
+                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
                 else:
                     return Mock(returncode=0, stdout="", stderr="")
             
@@ -29,7 +33,9 @@ class TestEnvironmentValidation:
                 )
             
             assert result.returncode != 0
-            assert "Missing required tools" in result.stderr or "gh" in result.stderr
+            # Match bash script's accumulated error format (lines 96-101)
+            assert "Missing required tools:" in result.stderr
+            assert "gh (GitHub CLI)" in result.stderr
     
     def test_missing_jq_tool(self, claude_tasker_script, mock_git_repo):
         """Test behavior when jq tool is missing."""
