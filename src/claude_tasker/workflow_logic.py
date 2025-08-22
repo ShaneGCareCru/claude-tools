@@ -31,11 +31,10 @@ class WorkflowLogic:
                  timeout_between_tasks: float = 10.0,
                  interactive_mode: bool = None,
                  coder: str = "claude",
-                 base_branch: str = "main"):
+                 base_branch: str = None):
         self.timeout_between_tasks = timeout_between_tasks
         self.interactive_mode = interactive_mode if interactive_mode is not None else os.isatty(0)
         self.coder = coder
-        self.base_branch = base_branch
         
         # Initialize components
         self.env_validator = EnvironmentValidator()
@@ -43,6 +42,9 @@ class WorkflowLogic:
         self.workspace_manager = WorkspaceManager()
         self.prompt_builder = PromptBuilder()
         self.pr_body_generator = PRBodyGenerator()
+        
+        # Detect base branch if not specified
+        self.base_branch = base_branch if base_branch is not None else self.workspace_manager.detect_main_branch()
         
         # Load project context
         self.claude_md_content = self._load_claude_md()

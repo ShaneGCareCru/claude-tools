@@ -123,9 +123,9 @@ Examples:
     
     parser.add_argument(
         '--base-branch',
-        default='main',
+        default=None,
         metavar='BRANCH',
-        help='Base branch for PRs (default: main)'
+        help='Base branch for PRs (default: auto-detect)'
     )
     
     parser.add_argument(
