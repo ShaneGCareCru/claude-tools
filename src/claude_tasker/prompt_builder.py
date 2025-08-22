@@ -3,7 +3,7 @@
 import subprocess
 import json
 import tempfile
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any
 from pathlib import Path
 from .github_client import IssueData, PRData
 
@@ -126,49 +126,49 @@ Keep the response focused and practical. Format as markdown."""
     
     def _execute_llm_tool(self, tool_name: str, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
         """Generic LLM tool execution with common logic."""
+        prompt_file = None
         try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(prompt)
+                prompt_file = f.name
+            
             # Build command based on tool
             if tool_name == 'llm':
-                cmd = ['llm', 'prompt', '-']
-                
-                result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False)
-                
-                if result.returncode == 0:
-                    # LLM tool returns plain text, wrap it in a dict
-                    return {
-                        'response': result.stdout.strip(),
-                        'success': True
-                    }
-                else:
-                    return None
-                    
+                cmd = [
+                    'llm', 'prompt', prompt_file
+                ]
             elif tool_name == 'claude':
-                cmd = ['claude']
-                
-                result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False)
-                
-                if result.returncode == 0:
-                    try:
-                        # Claude CLI returns JSON when --output-format json is used
-                        claude_response = json.loads(result.stdout)
-                        # Extract the result from Claude's JSON structure
-                        return {
-                            'response': claude_response.get('result', ''),
-                            'success': True
-                        }
-                    except json.JSONDecodeError:
-                        # Fallback to plain text if JSON parsing fails
-                        return {
-                            'response': result.stdout.strip(),
-                            'success': True
-                        }
-                else:
-                    return None
+                cmd = [
+                    'claude', '--file', prompt_file,
+                    '--max-tokens', str(max_tokens),
+                    '--output-format', 'json'
+                ]
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
+            
+            # Run with timeout to prevent hanging
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
+            
+            if result.returncode == 0:
+                try:
+                    return json.loads(result.stdout)
+                except json.JSONDecodeError:
+                    # Fallback: wrap plain text response
+                    return {
+                        'result': result.stdout.strip(),
+                        'optimized_prompt': result.stdout.strip()
+                    }
+            else:
+                return None
                 
-        except (FileNotFoundError, Exception):
+        except subprocess.TimeoutExpired:
             return None
+        except (FileNotFoundError, json.JSONDecodeError, Exception):
+            return None
+        finally:
+            # Ensure cleanup even on exception
+            if prompt_file and Path(prompt_file).exists():
+                Path(prompt_file).unlink()
     
     def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
         """Build prompt using LLM CLI tool."""
@@ -263,7 +263,7 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
             else:
                 prompt_result = llm_result
             
-            optimized_prompt = prompt_result.get('response', '')
+            optimized_prompt = prompt_result.get('optimized_prompt', prompt_result.get('result', ''))
             if not optimized_prompt:
                 results['error'] = "No optimized prompt in response"
                 return results

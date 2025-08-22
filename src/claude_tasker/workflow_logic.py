@@ -2,12 +2,12 @@
 
 import time
 import os
-from typing import Dict, List, Optional, Any, Tuple
+from typing import List, Optional, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 
 from .environment_validator import EnvironmentValidator
-from .github_client import GitHubClient, IssueData, PRData
+from .github_client import GitHubClient
 from .workspace_manager import WorkspaceManager
 from .prompt_builder import PromptBuilder
 from .pr_body_generator import PRBodyGenerator
@@ -123,12 +123,6 @@ class WorkflowLogic:
                     issue_number=issue_number
                 )
             
-            # Build context for prompt generation
-            context = {
-                'git_diff': self.workspace_manager.get_git_diff(),
-                **project_context
-            }
-            
             # Generate and execute prompt using two-stage execution
             task_data = {
                 'issue_number': issue_number,
@@ -166,7 +160,7 @@ class WorkflowLogic:
             # Check if there are changes to commit
             if self.workspace_manager.has_changes_to_commit():
                 # Commit changes
-                commit_msg = f"automated implementation via agent coordination"
+                commit_msg = "automated implementation via agent coordination"
                 if not self.workspace_manager.commit_changes(commit_msg, branch_name):
                     return WorkflowResult(
                         success=False,
@@ -235,7 +229,7 @@ The implementation has been completed and is ready for review.
             else:
                 # No changes made - issue might already be complete
                 # Comment on issue explaining the situation
-                no_changes_comment = f"""## 🤖 Automated Analysis Complete
+                no_changes_comment = """## 🤖 Automated Analysis Complete
 
 **Audit Results:**
 - Issue was analyzed using Lyra-Dev 4-D methodology
@@ -383,9 +377,13 @@ The issue has been reviewed and no further action is needed at this time.
                 bug_description, self.claude_md_content, context
             )
             
-            # Execute analysis
+            # Execute analysis - try Claude first, then fallback to LLM
             analysis_result = self.prompt_builder.build_with_claude(analysis_prompt)
             
+            if not analysis_result:
+                # Fallback to LLM tool
+                analysis_result = self.prompt_builder.build_with_llm(analysis_prompt)
+                
             if not analysis_result:
                 return WorkflowResult(
                     success=False,
@@ -395,7 +393,7 @@ The issue has been reviewed and no further action is needed at this time.
             # If not prompt-only, create GitHub issue
             if not prompt_only:
                 issue_title = f"Bug: {bug_description[:50]}..."
-                issue_body = analysis_result.get('response', bug_description)
+                issue_body = analysis_result.get('result', analysis_result.get('optimized_prompt', bug_description))
                 
                 issue_url = self.github_client.create_issue(
                     title=issue_title,
