@@ -42,7 +42,6 @@ class TestRealExecutionIntegration:
             
             yield repo_path
 
-    @pytest.mark.skip(reason="GitHub client API changed from fetch_issue to get_issue - needs update")
     def test_real_claude_execution_creates_files(self, real_git_repo):
         """CRITICAL: Test that execute_mode=True actually creates files.
         
@@ -54,16 +53,23 @@ class TestRealExecutionIntegration:
         except (subprocess.CalledProcessError, FileNotFoundError):
             pytest.skip("Claude CLI not available")
         
-        # Mock the issue data since we can't create real GitHub issues in tests
-        mock_issue_data = {
-            "title": "Add .gitignore file",
-            "body": "Create a standard .gitignore file for Node.js projects",
-            "labels": []
-        }
+        # Import and use current API
+        from src.claude_tasker.github_client import IssueData
+        
+        # Mock the issue data using current IssueData structure
+        mock_issue_data = IssueData(
+            number=1,
+            title="Add .gitignore file",
+            body="Create a standard .gitignore file for Node.js projects",
+            labels=[],
+            url="https://github.com/test/repo/issues/1",
+            author="testuser",
+            state="open"
+        )
         
         # Test the Python module directly with real execution
-        with patch('src.claude_tasker.github_client.GitHubClient.fetch_issue') as mock_fetch:
-            mock_fetch.return_value = type('Issue', (), mock_issue_data)()
+        with patch('src.claude_tasker.github_client.GitHubClient.get_issue') as mock_get_issue:
+            mock_get_issue.return_value = mock_issue_data
             
             # Import and test the actual Python implementation
             from src.claude_tasker.workflow_logic import WorkflowLogic
@@ -71,7 +77,13 @@ class TestRealExecutionIntegration:
             
             # Initialize with real workspace
             workspace_manager = WorkspaceManager(str(real_git_repo))
-            workflow = WorkflowLogic(workspace_manager=workspace_manager)
+            
+            # Initialize workflow with current API (no constructor parameters)
+            workflow = WorkflowLogic()
+            
+            # Set the workspace manually after initialization
+            workflow.workspace_manager = workspace_manager
+            workflow.github_client.get_issue = mock_get_issue
             
             # Check initial state - no .gitignore exists
             gitignore_path = real_git_repo / ".gitignore"

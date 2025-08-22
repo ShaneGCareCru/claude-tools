@@ -343,39 +343,34 @@ class TestCriticalEdgeCases:
             # Restore original working directory
             os.chdir(original_cwd)
 
-    @pytest.mark.skip(reason="Test causes permission issues during cleanup in CI environment")
     def test_permission_denied_file_operations(self, dirty_git_repo):
         """Test behavior when file operations are denied.
         
         CRITICAL: Could happen with read-only file systems or permission issues.
         """
-        # Make repository read-only
-        for root, dirs, files in os.walk(dirty_git_repo):
-            for d in dirs:
-                os.chmod(os.path.join(root, d), 0o444)
-            for f in files:
-                os.chmod(os.path.join(root, f), 0o444)
-        
         from src.claude_tasker.workspace_manager import WorkspaceManager
         
         workspace_manager = WorkspaceManager(str(dirty_git_repo))
         
-        try:
-            # Should handle permission errors gracefully
-            result = workspace_manager.has_changes_to_commit()
+        # Mock subprocess to simulate permission errors
+        with patch('subprocess.run') as mock_run:
+            # Simulate permission denied error
+            mock_run.side_effect = subprocess.CalledProcessError(
+                returncode=128, 
+                cmd=['git', 'status', '--porcelain'],
+                stderr="fatal: unable to access repository: Permission denied"
+            )
             
-            # Either should work (if git can read) or fail gracefully
-            assert isinstance(result, bool) or result is None
-        except Exception as e:
-            # If it raises, should be a clear permission error
-            assert "permission" in str(e).lower() or "denied" in str(e).lower()
-        finally:
-            # Restore permissions for cleanup
-            for root, dirs, files in os.walk(dirty_git_repo):
-                for d in dirs:
-                    os.chmod(os.path.join(root, d), 0o755)
-                for f in files:
-                    os.chmod(os.path.join(root, f), 0o644)
+            # Should handle permission errors gracefully without crashing
+            try:
+                result = workspace_manager.has_changes_to_commit()
+                # Should return False or handle gracefully (implementation dependent)
+                assert isinstance(result, bool)
+            except Exception as e:
+                # Should not raise unhandled exceptions, but if it does, 
+                # it should be a clear permission-related error
+                assert "permission" in str(e).lower() or "denied" in str(e).lower(), \
+                    f"Unexpected error type for permission denied: {e}"
 
 
 class TestNetworkEdgeCases:

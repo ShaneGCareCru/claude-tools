@@ -72,33 +72,26 @@ Brief description of changes
             # Template file should be accessible
             assert pr_template.exists()
     
-    @pytest.mark.skip(reason="Test needs rewrite for Python module - tests bash script subprocess calls")
     def test_context_aggregation_for_pr_body(self, claude_tasker_script, mock_git_repo):
         """Test aggregation of context for intelligent PR body generation."""
-        with patch('subprocess.run') as mock_run, \
-             patch('tempfile.NamedTemporaryFile') as mock_temp, \
-             patch('builtins.open', mock_open()):
-            
-            mock_temp.return_value.__enter__.return_value.name = '/tmp/test_output.txt'
-            
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                
-                if 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                elif 'gh issue view' in cmd:
-                    # Rich issue context
-                    issue_data = {
-                        "title": "Implement comprehensive test suite",
-                        "body": "Add testing framework with coverage reporting and CI integration",
-                        "labels": [{"name": "enhancement"}, {"name": "testing"}]
-                    }
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'git diff main...HEAD' in cmd:
-                    # Substantial git diff
-                    diff_content = """diff --git a/tests/test_suite.py b/tests/test_suite.py
+        from src.claude_tasker.pr_body_generator import PRBodyGenerator
+        from src.claude_tasker.github_client import IssueData
+        
+        generator = PRBodyGenerator()
+        
+        # Create rich issue data
+        issue_data = IssueData(
+            number=123,
+            title="Implement comprehensive test suite",
+            body="Add testing framework with coverage reporting and CI integration",
+            labels=["enhancement", "testing"],
+            url="https://github.com/test/repo/issues/123",
+            author="testuser",
+            state="open"
+        )
+        
+        # Substantial git diff
+        git_diff = """diff --git a/tests/test_suite.py b/tests/test_suite.py
 new file mode 100644
 index 0000000..abc123
 --- /dev/null
@@ -109,108 +102,71 @@ index 0000000..abc123
 +class TestSuite:
 +    def test_example(self):
 +        assert True"""
-                    return Mock(returncode=0, stdout=diff_content, stderr="")
-                elif 'git log --oneline -5' in cmd:
-                    # Recent commit history for style reference
-                    commits = """abc123 Add test framework
+        
+        branch_name = "feature/comprehensive-tests"
+        commit_log = """abc123 Add test framework
 def456 Update CI configuration
 ghi789 Fix bug in parser
 jkl012 Refactor core module
 mno345 Initial implementation"""
-                    return Mock(returncode=0, stdout=commits, stderr="")
-                elif 'command -v llm' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/llm", stderr="")
-                elif 'llm' in cmd and 'chat' in cmd:
-                    # LLM synthesis of all context
-                    pr_body = """## Summary
-Implements comprehensive test suite with pytest framework
-
-## Changes Made
-- Added test_suite.py with initial test cases
-- Configured pytest with coverage reporting
-- Updated CI pipeline for automated testing
-
-## Testing
-- ✅ All new tests pass
-- ✅ Coverage report shows 90%+ coverage
-- ✅ CI integration verified"""
-                    return Mock(returncode=0, stdout=pr_body, stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
-            
-            mock_run.side_effect = cmd_side_effect
-            
-            with patch('os.chdir'), patch.dict('os.environ', {'CLAUDE_TASKER_AUTO_CLEANUP': '1'}):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should aggregate context successfully
-            assert result.returncode == 0
-            
-            # Verify context gathering commands were called
-            diff_calls = [call for call in mock_run.call_args_list 
-                         if 'git diff' in str(call.args) and 'HEAD' in str(call.args)]
-            log_calls = [call for call in mock_run.call_args_list 
-                        if 'git log --oneline' in str(call.args)]
-            llm_calls = [call for call in mock_run.call_args_list 
-                        if 'llm' in str(call.args)]
-            
-            assert len(diff_calls) > 0
-            assert len(log_calls) > 0  
-            assert len(llm_calls) > 0
+        
+        # Test context aggregation
+        context = generator.aggregate_context(issue_data, git_diff, branch_name, commit_log)
+        
+        # Verify context structure
+        assert context['issue']['number'] == 123
+        assert context['issue']['title'] == "Implement comprehensive test suite"
+        assert "enhancement" in context['issue']['labels']
+        assert "testing" in context['issue']['labels']
+        
+        assert context['changes']['branch'] == branch_name
+        assert context['changes']['commit_log'] == commit_log
+        
+        # Verify diff summary
+        diff_summary = context['changes']['diff_summary']
+        assert diff_summary['files_changed'] == 1
+        assert 'tests/test_suite.py' in diff_summary['files']
+        assert diff_summary['additions'] > 0
+        
+        # Verify stats
+        stats = context['stats']
+        assert stats['files_added'] == 1
+        assert stats['lines_added'] > 0
     
-    @pytest.mark.skip(reason="Test needs rewrite for Python module - tests bash script subprocess calls")
     def test_llm_tool_fallback_to_claude(self, claude_tasker_script, mock_git_repo):
         """Test fallback from LLM tool to Claude output when LLM unavailable."""
-        with patch('subprocess.run') as mock_run, \
-             patch('tempfile.NamedTemporaryFile') as mock_temp, \
-             patch('builtins.open', mock_open()):
+        from src.claude_tasker.pr_body_generator import PRBodyGenerator
+        from src.claude_tasker.github_client import IssueData
+        
+        generator = PRBodyGenerator()
+        
+        issue_data = IssueData(
+            number=123,
+            title="Test Issue",
+            body="Test implementation",
+            labels=[],
+            url="https://github.com/test/repo/issues/123",
+            author="testuser",
+            state="open"
+        )
+        
+        git_diff = "diff --git a/file.py b/file.py\n+new line"
+        branch_name = "test-branch"
+        commit_log = "abc123 Test commit"
+        
+        # Test context aggregation
+        context = generator.aggregate_context(issue_data, git_diff, branch_name, commit_log)
+        
+        # Mock LLM failure, Claude success
+        with patch.object(generator, 'generate_with_llm', return_value=None) as mock_llm, \
+             patch.object(generator, 'generate_with_claude', return_value="Claude generated PR body") as mock_claude:
             
-            mock_temp.return_value.__enter__.return_value.name = '/tmp/claude_output.txt'
+            result = generator.generate_pr_body(issue_data, git_diff, branch_name, commit_log)
             
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                
-                if 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                elif 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'command -v llm' in cmd:
-                    # LLM tool not available
-                    return Mock(returncode=1, stdout="", stderr="llm: command not found")
-                elif 'claude' in cmd:
-                    return Mock(returncode=0, stdout="Claude-generated PR analysis", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
-            
-            mock_run.side_effect = cmd_side_effect
-            
-            with patch('os.chdir'), patch.dict('os.environ', {'CLAUDE_TASKER_AUTO_CLEANUP': '1'}):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should fall back to Claude output
-            assert result.returncode == 0
-            
-            # Verify LLM availability was checked and Claude was used
-            llm_check_calls = [call for call in mock_run.call_args_list 
-                              if 'command -v llm' in str(call.args)]
-            claude_calls = [call for call in mock_run.call_args_list 
-                           if 'claude' in str(call.args)]
-            
-            assert len(llm_check_calls) > 0
-            assert len(claude_calls) > 0
+            # Should fall back to Claude
+            assert result == "Claude generated PR body"
+            mock_llm.assert_called_once()
+            mock_claude.assert_called_once()
     
     def test_pr_body_size_constraint_handling(self, claude_tasker_script, mock_git_repo):
         """Test handling of PR body size constraints (10,000 character limit)."""
@@ -316,69 +272,40 @@ Large feature implementation with 50+ files changed
             assert (github_dir / "pull_request_template.md").exists()
             assert (github_dir / "PULL_REQUEST_TEMPLATE.md").exists()
     
-    @pytest.mark.skip(reason="Integration test needs rewrite for Python module - tests bash script subprocess calls")
     def test_pr_body_claude_analysis_integration(self, claude_tasker_script, mock_git_repo):
         """Test integration of Claude analysis with PR body generation."""
-        with patch('subprocess.run') as mock_run, \
-             patch('tempfile.NamedTemporaryFile') as mock_temp, \
-             patch('builtins.open', mock_open(read_data="Claude analysis: Implementation successful")):
+        from src.claude_tasker.pr_body_generator import PRBodyGenerator
+        from src.claude_tasker.github_client import IssueData
+        
+        generator = PRBodyGenerator()
+        
+        issue_data = IssueData(
+            number=123,
+            title="Integration test",
+            body="Test integration functionality",
+            labels=["feature"],
+            url="https://github.com/test/repo/issues/123",
+            author="testuser",
+            state="open"
+        )
+        
+        git_diff = "diff --git a/integration.py b/integration.py\n+integration code"
+        branch_name = "feature/integration"
+        commit_log = "abc123 Add integration feature"
+        
+        # Test full PR body generation pipeline
+        with patch.object(generator, 'generate_with_llm', return_value="LLM generated comprehensive PR body with analysis") as mock_llm:
             
-            mock_temp.return_value.__enter__.return_value.name = '/tmp/claude_analysis.txt'
+            result = generator.generate_pr_body(issue_data, git_diff, branch_name, commit_log)
             
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                
-                if 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                elif 'gh issue view' in cmd:
-                    issue_data = {"title": "Integration test", "body": "Test integration", "labels": []}
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'claude' in cmd and '--output-format json' in cmd:
-                    # Claude analysis stage
-                    analysis = {
-                        "analysis": "Comprehensive implementation completed",
-                        "changes": ["Added new features", "Updated tests", "Fixed bugs"],
-                        "testing": "All tests pass with 95% coverage"
-                    }
-                    return Mock(returncode=0, stdout=json.dumps(analysis), stderr="")
-                elif 'command -v llm' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/llm", stderr="")
-                elif 'llm' in cmd:
-                    # LLM integration of Claude analysis
-                    integrated_pr_body = """## Summary
-Integration test implementation based on Claude analysis
-
-## Implementation Details
-Comprehensive implementation completed with the following changes:
-- Added new features
-- Updated tests  
-- Fixed bugs
-
-## Testing Results
-All tests pass with 95% coverage as verified by Claude analysis"""
-                    return Mock(returncode=0, stdout=integrated_pr_body, stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            # Should integrate analysis successfully
+            assert result == "LLM generated comprehensive PR body with analysis"
+            mock_llm.assert_called_once()
             
-            mock_run.side_effect = cmd_side_effect
+            # Verify context was properly aggregated
+            call_args = mock_llm.call_args[0]
+            context = call_args[0]  # First argument to generate_with_llm is context
             
-            with patch('os.chdir'), patch.dict('os.environ', {'CLAUDE_TASKER_AUTO_CLEANUP': '1'}):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should integrate Claude analysis with PR body
-            assert result.returncode == 0
-            
-            # Verify Claude analysis and LLM integration
-            claude_calls = [call for call in mock_run.call_args_list 
-                           if 'claude' in str(call.args) and '--output-format json' in str(call.args)]
-            llm_calls = [call for call in mock_run.call_args_list 
-                        if 'llm' in str(call.args)]
-            
-            assert len(claude_calls) > 0 or len(llm_calls) > 0
+            assert context['issue']['title'] == "Integration test"
+            assert context['changes']['branch'] == "feature/integration"
+            assert context['stats']['files_modified'] >= 0

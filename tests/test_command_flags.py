@@ -121,12 +121,21 @@ class TestCommandFlags:
             
             assert result.returncode == 0
     
-    @pytest.mark.skip(reason="Interactive/prompt-only validation not implemented in Python CLI yet")
     def test_interactive_with_review_pr(self, claude_tasker_script, mock_git_repo):
         """Test --interactive flag with --review-pr."""
-        # TODO: Add validation for --interactive and --prompt-only conflict
-        # Currently the Python CLI accepts both flags without validation
-        pass
+        from src.claude_tasker.cli import validate_arguments, create_argument_parser
+        
+        # Test the validation directly using the Python module
+        parser = create_argument_parser()
+        args = parser.parse_args([
+            "--review-pr", "456",
+            "--interactive"
+        ])
+        
+        validation_error = validate_arguments(args)
+        
+        # Should succeed - no conflict between interactive and review-pr
+        assert validation_error is None
     
     def test_base_branch_with_issue_implementation(self, claude_tasker_script, mock_git_repo):
         """Test --base-branch flag with issue implementation."""
@@ -279,12 +288,23 @@ class TestCommandFlags:
                 stderr_content = captured_stderr.getvalue()
                 assert "auto-pr-review can only be used with issue" in stderr_content
     
-    @pytest.mark.skip(reason="Interactive/prompt-only validation not implemented in Python CLI yet")
     def test_prompt_only_interactive_conflict(self, claude_tasker_script, mock_git_repo):
         """Test --prompt-only and --interactive conflict."""
-        # TODO: Add validation for --interactive and --prompt-only conflict
-        # Currently the Python CLI accepts both flags without validation
-        pass
+        from src.claude_tasker.cli import validate_arguments, create_argument_parser
+        
+        # Test the validation directly using the Python module
+        parser = create_argument_parser()
+        args = parser.parse_args([
+            "123",
+            "--prompt-only", 
+            "--interactive"
+        ])
+        
+        validation_error = validate_arguments(args)
+        
+        # Should fail with validation error
+        assert validation_error is not None
+        assert "--interactive and --prompt-only cannot be used together" in validation_error
     
     def test_flag_order_independence(self, claude_tasker_script, mock_git_repo):
         """Test that flag order doesn't matter."""
