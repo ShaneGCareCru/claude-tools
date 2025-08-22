@@ -223,7 +223,6 @@ class TestRealExecutionIntegration:
         # With the original bug, this would fail
         # We can't guarantee file creation without mocking, but we can verify execution occurred
 
-    @pytest.mark.skip(reason="WorkflowLogic constructor API changed - no longer accepts workspace_manager parameter")
     def test_end_to_end_workflow_simulation(self, real_git_repo):
         """Simulate complete workflow to catch integration issues.
         
@@ -238,30 +237,38 @@ class TestRealExecutionIntegration:
                 pytest.skip(f"Required tool '{tool}' not available")
         
         # Mock GitHub integration since we can't create real issues
-        mock_issue = {
-            "title": "Add README file",
-            "body": "Create a README.md file with project description",
-            "labels": []
-        }
+        from src.claude_tasker.github_client import IssueData
         
-        with patch('src.claude_tasker.github_client.GitHubClient') as mock_gh:
-            # Mock GitHub calls
-            mock_gh.return_value.fetch_issue.return_value = type('Issue', (), mock_issue)()
-            mock_gh.return_value.comment_on_issue.return_value = True
-            mock_gh.return_value.create_pr.return_value = "https://github.com/test/test/pull/1"
+        mock_issue_data = IssueData(
+            number=1,
+            title="Add README file",
+            body="Create a README.md file with project description",
+            labels=[],
+            url="https://github.com/test/repo/issues/1",
+            author="testuser",
+            state="open"
+        )
+        
+        with patch('src.claude_tasker.github_client.GitHubClient') as mock_gh_class:
+            # Mock GitHub client instance
+            mock_gh_instance = mock_gh_class.return_value
+            mock_gh_instance.get_issue.return_value = mock_issue_data
+            mock_gh_instance.comment_on_issue.return_value = True
+            mock_gh_instance.create_pr.return_value = "https://github.com/test/test/pull/1"
             
             # Import the main workflow
             from src.claude_tasker.workflow_logic import WorkflowLogic
             from src.claude_tasker.workspace_manager import WorkspaceManager
-            from src.claude_tasker.github_client import GitHubClient
             
-            # Setup real components
+            # Setup real components  
             workspace_manager = WorkspaceManager(str(real_git_repo))
-            github_client = mock_gh.return_value
-            workflow = WorkflowLogic(
-                workspace_manager=workspace_manager,
-                github_client=github_client
-            )
+            
+            # Initialize workflow with current API (no constructor parameters)
+            workflow = WorkflowLogic()
+            
+            # Set the workspace manually after initialization
+            workflow.workspace_manager = workspace_manager
+            workflow.github_client = mock_gh_instance
             
             # Record initial state
             initial_changes = workspace_manager.has_changes_to_commit()
