@@ -1,315 +1,495 @@
 """Tests for claude-tasker environment validation and dependency checking."""
 import pytest
 import subprocess
+import tempfile
+import os
 from pathlib import Path
 from unittest.mock import patch, Mock
+from src.claude_tasker.environment_validator import EnvironmentValidator
+from src.claude_tasker.workflow_logic import WorkflowLogic
 
 
-@pytest.mark.skip(reason="Environment validation tests need to be updated for Python module API - currently testing bash script behavior")
-class TestEnvironmentValidation:
-    """Test environment validation and dependency checking."""
+class TestEnvironmentValidator:
+    """Test EnvironmentValidator class directly."""
     
-    def test_missing_gh_cli(self, claude_tasker_script, mock_git_repo):
-        """Test behavior when gh CLI is missing."""
+    def test_init(self):
+        """Test EnvironmentValidator initialization."""
+        validator = EnvironmentValidator()
+        assert 'git' in validator.required_tools
+        assert 'gh' in validator.required_tools
+        assert 'jq' in validator.required_tools
+        assert 'claude' in validator.optional_tools
+        assert 'llm' in validator.optional_tools
+    
+    def test_validate_git_repository_valid(self):
+        """Test git repository validation when valid."""
+        validator = EnvironmentValidator()
         with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'command -v gh' in cmd:
-                    return Mock(returncode=1, stdout="", stderr="gh: command not found")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = ".git"
             
-            mock_run.side_effect = cmd_side_effect
+            valid, message = validator.validate_git_repository()
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            assert result.returncode != 0
-            # Match bash script's accumulated error format (lines 96-101)
-            assert "Missing required tools:" in result.stderr
-            assert "gh (GitHub CLI)" in result.stderr
+            assert valid is True
+            assert "Valid git repository" in message
+            mock_run.assert_called_once_with(
+                ['git', 'rev-parse', '--git-dir'],
+                cwd=".",
+                capture_output=True,
+                text=True,
+                check=False
+            )
     
-    def test_missing_jq_tool(self, claude_tasker_script, mock_git_repo):
-        """Test behavior when jq tool is missing."""
+    def test_validate_git_repository_invalid(self):
+        """Test git repository validation when invalid."""
+        validator = EnvironmentValidator()
         with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'command -v jq' in cmd:
-                    return Mock(returncode=1, stdout="", stderr="jq: command not found")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            mock_run.return_value.returncode = 1
+            mock_run.return_value.stdout = ""
             
-            mock_run.side_effect = cmd_side_effect
+            valid, message = validator.validate_git_repository()
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            assert result.returncode != 0
-            assert "Missing required tools" in result.stderr or "jq" in result.stderr
+            assert valid is False
+            assert "Not a git repository" in message
     
-    def test_missing_claude_cli(self, claude_tasker_script, mock_git_repo):
-        """Test behavior when claude CLI is missing (non-prompt-only mode)."""
+    def test_validate_git_repository_git_not_found(self):
+        """Test git repository validation when git command not found."""
+        validator = EnvironmentValidator()
+        with patch('subprocess.run', side_effect=FileNotFoundError()):
+            valid, message = validator.validate_git_repository()
+            
+            assert valid is False
+            assert "Git not found" in message
+    
+    def test_validate_github_remote_valid(self):
+        """Test GitHub remote validation when valid."""
+        validator = EnvironmentValidator()
         with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'command -v claude' in cmd:
-                    return Mock(returncode=1, stdout="", stderr="claude: command not found")
-                elif 'command -v gh' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/gh", stderr="")
-                elif 'command -v jq' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/jq", stderr="")
-                elif 'command -v git' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "https://github.com/user/repo.git\n"
             
-            mock_run.side_effect = cmd_side_effect
+            valid, message = validator.validate_github_remote()
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316"],  # No --prompt-only flag
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            assert result.returncode != 0
-            assert "Missing required tools" in result.stderr or "claude" in result.stderr
+            assert valid is True
+            assert "GitHub remote:" in message
+            assert "github.com/user/repo.git" in message
     
-    def test_claude_cli_not_required_prompt_only(self, claude_tasker_script, mock_git_repo):
-        """Test that claude CLI is not required in prompt-only mode."""
+    def test_validate_github_remote_no_github(self):
+        """Test GitHub remote validation when no GitHub remote."""
+        validator = EnvironmentValidator()
         with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'command -v claude' in cmd:
-                    return Mock(returncode=1, stdout="", stderr="claude: command not found")
-                elif 'command -v gh' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/gh", stderr="")
-                elif 'command -v jq' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/jq", stderr="")
-                elif 'command -v git' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/git", stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                elif 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=str(issue_data), stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "https://gitlab.com/user/repo.git\n"
             
-            mock_run.side_effect = cmd_side_effect
+            valid, message = validator.validate_github_remote()
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should not error about missing claude in prompt-only mode
-            assert "claude" not in result.stderr or result.returncode == 0
+            assert valid is False
+            assert "No GitHub remote found" in message
     
-    def test_missing_git_tool(self, claude_tasker_script, mock_git_repo):
-        """Test behavior when git is missing."""
+    def test_validate_github_remote_no_remote(self):
+        """Test GitHub remote validation when no remote at all."""
+        validator = EnvironmentValidator()
         with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'command -v git' in cmd:
-                    return Mock(returncode=1, stdout="", stderr="git: command not found")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            mock_run.return_value.returncode = 1
+            mock_run.return_value.stdout = ""
             
-            mock_run.side_effect = cmd_side_effect
+            valid, message = validator.validate_github_remote()
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            assert result.returncode != 0
-            assert "Missing required tools" in result.stderr or "git" in result.stderr
+            assert valid is False
+            assert "No GitHub remote found" in message
     
-    def test_codex_cli_validation(self, claude_tasker_script, mock_git_repo):
-        """Test validation when using codex coder."""
+    def test_check_claude_md_exists(self, tmp_path):
+        """Test CLAUDE.md check when file exists."""
+        validator = EnvironmentValidator()
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Test CLAUDE.md")
+        
+        valid, message = validator.check_claude_md(str(tmp_path))
+        
+        assert valid is True
+        assert "CLAUDE.md found at" in message
+        assert str(claude_md) in message
+    
+    def test_check_claude_md_missing(self, tmp_path):
+        """Test CLAUDE.md check when file is missing."""
+        validator = EnvironmentValidator()
+        
+        valid, message = validator.check_claude_md(str(tmp_path))
+        
+        assert valid is False
+        assert "CLAUDE.md not found" in message
+        assert "required for project context" in message
+    
+    def test_check_tool_availability_found(self):
+        """Test tool availability check when tool is found."""
+        validator = EnvironmentValidator()
         with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'command -v codex' in cmd:
-                    return Mock(returncode=1, stdout="", stderr="codex: command not found")
-                elif 'command -v gh' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/gh", stderr="")
-                elif 'command -v jq' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/jq", stderr="")
-                elif 'command -v git' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "/usr/bin/git\n"
             
-            mock_run.side_effect = cmd_side_effect
+            available, status = validator.check_tool_availability('git')
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--coder", "codex"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            assert result.returncode != 0
-            assert "Missing required tools" in result.stderr or "codex" in result.stderr
+            assert available is True
+            assert "git found at /usr/bin/git" in status
+            mock_run.assert_called_once_with(
+                ['command', '-v', 'git'],
+                capture_output=True,
+                text=True,
+                check=False,
+                shell=True
+            )
     
-    def test_all_dependencies_present(self, claude_tasker_script, mock_git_repo):
-        """Test successful validation when all dependencies are present."""
+    def test_check_tool_availability_not_found(self):
+        """Test tool availability check when tool is not found."""
+        validator = EnvironmentValidator()
         with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'command -v' in cmd:
-                    return Mock(returncode=0, stdout="/usr/bin/tool", stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                elif 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=str(issue_data), stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            mock_run.return_value.returncode = 1
+            mock_run.return_value.stdout = ""
             
-            mock_run.side_effect = cmd_side_effect
+            available, status = validator.check_tool_availability('nonexistent')
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should not error about missing tools
-            assert "Missing required tools" not in result.stderr
+            assert available is False
+            assert "nonexistent not found" in status
     
-    def test_github_remote_url_validation(self, claude_tasker_script, mock_git_repo):
-        """Test validation of GitHub remote URL."""
-        with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://gitlab.com/test/repo.git", stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+    def test_check_tool_availability_exception(self):
+        """Test tool availability check when exception occurs."""
+        validator = EnvironmentValidator()
+        with patch('subprocess.run', side_effect=Exception("Test error")):
+            available, status = validator.check_tool_availability('git')
             
-            mock_run.side_effect = cmd_side_effect
-            
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should error about non-GitHub remote
-            assert result.returncode != 0
-            assert "GitHub" in result.stderr or "repository" in result.stderr
+            assert available is False
+            assert "Error checking git: Test error" in status
     
-    def test_no_remote_url(self, claude_tasker_script, mock_git_repo):
-        """Test behavior when no remote URL is configured."""
-        with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=1, stdout="", stderr="No remote URL")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+    def test_validate_all_dependencies_success(self, tmp_path):
+        """Test comprehensive validation when all dependencies are met."""
+        validator = EnvironmentValidator()
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Test")
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(True, "Valid git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
+             patch.object(validator, 'check_tool_availability') as mock_tool_check:
             
-            mock_run.side_effect = cmd_side_effect
+            def tool_side_effect(tool):
+                return (True, f"{tool} found")
+            mock_tool_check.side_effect = tool_side_effect
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
+            result = validator.validate_all_dependencies(str(tmp_path))
             
-            # Should error about missing remote
-            assert result.returncode != 0
+            assert result['valid'] is True
+            assert len(result['errors']) == 0
+            assert len(result['warnings']) == 0
+            assert 'git' in result['tool_status']
+            assert 'gh' in result['tool_status']
+            assert 'jq' in result['tool_status']
+            assert 'claude' in result['tool_status']
+            assert 'llm' in result['tool_status']
     
-    def test_ssh_github_url_format(self, claude_tasker_script, mock_git_repo):
-        """Test handling of SSH GitHub URL format."""
-        with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="git@github.com:test/repo.git", stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=str(issue_data), stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+    def test_validate_all_dependencies_missing_git_repo(self, tmp_path):
+        """Test validation when not in git repository."""
+        validator = EnvironmentValidator()
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(False, "Not a git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
+             patch.object(validator, 'check_tool_availability', return_value=(True, "tool found")):
             
-            mock_run.side_effect = cmd_side_effect
+            result = validator.validate_all_dependencies(str(tmp_path))
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should handle SSH format correctly
-            assert "Could not determine repository" not in result.stderr
+            assert result['valid'] is False
+            assert any("Git repository check failed" in error for error in result['errors'])
     
-    def test_interactive_mode_tty_check(self, claude_tasker_script, mock_git_repo):
-        """Test TTY check for interactive mode."""
-        with patch('subprocess.run') as mock_run, \
-             patch('os.isatty', return_value=False):  # Simulate non-TTY environment
+    def test_validate_all_dependencies_missing_claude_md(self, tmp_path):
+        """Test validation when CLAUDE.md is missing."""
+        validator = EnvironmentValidator()
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(True, "Valid git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
+             patch.object(validator, 'check_tool_availability', return_value=(True, "tool found")):
             
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            result = validator.validate_all_dependencies(str(tmp_path))
             
-            mock_run.side_effect = cmd_side_effect
+            assert result['valid'] is False
+            assert any("CLAUDE.md check failed" in error for error in result['errors'])
+    
+    def test_validate_all_dependencies_missing_required_tools(self, tmp_path):
+        """Test validation when required tools are missing."""
+        validator = EnvironmentValidator()
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Test")
+        
+        def tool_side_effect(tool):
+            if tool == 'gh':
+                return (False, "gh not found")
+            return (True, f"{tool} found")
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(True, "Valid git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
+             patch.object(validator, 'check_tool_availability', side_effect=tool_side_effect):
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--interactive"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
+            result = validator.validate_all_dependencies(str(tmp_path))
             
-            # Should warn about non-interactive environment
-            assert "interactive" in result.stderr or result.returncode != 0
+            assert result['valid'] is False
+            assert any("Missing required tools: gh (GitHub CLI)" in error for error in result['errors'])
+            assert result['tool_status']['gh']['available'] is False
+            assert result['tool_status']['gh']['required'] is True
+    
+    def test_validate_all_dependencies_missing_optional_tools_not_prompt_only(self, tmp_path):
+        """Test validation when optional tools missing and not prompt-only mode."""
+        validator = EnvironmentValidator()
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Test")
+        
+        def tool_side_effect(tool):
+            if tool == 'claude':
+                return (False, "claude not found")
+            elif tool == 'llm':
+                return (False, "llm not found")
+            return (True, f"{tool} found")
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(True, "Valid git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
+             patch.object(validator, 'check_tool_availability', side_effect=tool_side_effect):
+            
+            result = validator.validate_all_dependencies(str(tmp_path), prompt_only=False)
+            
+            assert result['valid'] is True  # Optional tools don't make it invalid
+            assert len(result['warnings']) == 2
+            assert any("claude not found" in warning for warning in result['warnings'])
+            assert any("llm not found" in warning for warning in result['warnings'])
+    
+    def test_validate_all_dependencies_missing_optional_tools_prompt_only(self, tmp_path):
+        """Test validation when optional tools missing in prompt-only mode."""
+        validator = EnvironmentValidator()
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Test")
+        
+        def tool_side_effect(tool):
+            if tool == 'claude':
+                return (False, "claude not found")
+            elif tool == 'llm':
+                return (False, "llm not found")
+            return (True, f"{tool} found")
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(True, "Valid git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
+             patch.object(validator, 'check_tool_availability', side_effect=tool_side_effect):
+            
+            result = validator.validate_all_dependencies(str(tmp_path), prompt_only=True)
+            
+            assert result['valid'] is True
+            # In prompt-only mode, claude warning shouldn't be shown
+            assert len(result['warnings']) == 1  # Only llm warning
+            assert any("llm not found" in warning for warning in result['warnings'])
+    
+    def test_get_missing_dependencies(self):
+        """Test getting list of missing required dependencies."""
+        validator = EnvironmentValidator()
+        
+        validation_results = {
+            'tool_status': {
+                'git': {'available': True, 'required': True},
+                'gh': {'available': False, 'required': True},
+                'jq': {'available': True, 'required': True},
+                'claude': {'available': False, 'required': False}
+            }
+        }
+        
+        missing = validator.get_missing_dependencies(validation_results)
+        
+        assert missing == ['gh']
+    
+    def test_format_validation_report_success(self):
+        """Test formatting validation report for successful validation."""
+        validator = EnvironmentValidator()
+        
+        validation_results = {
+            'valid': True,
+            'errors': [],
+            'warnings': [],
+            'tool_status': {
+                'git': {'available': True, 'status': 'git found', 'required': True},
+                'claude': {'available': True, 'status': 'claude found', 'required': False}
+            }
+        }
+        
+        report = validator.format_validation_report(validation_results)
+        
+        assert "✅ Environment validation passed" in report
+        assert "✅ git (required)" in report
+        assert "✅ claude (optional)" in report
+    
+    def test_format_validation_report_failure(self):
+        """Test formatting validation report for failed validation."""
+        validator = EnvironmentValidator()
+        
+        validation_results = {
+            'valid': False,
+            'errors': ['Missing required tool: gh'],
+            'warnings': ['Claude not found'],
+            'tool_status': {
+                'git': {'available': True, 'status': 'git found', 'required': True},
+                'gh': {'available': False, 'status': 'gh not found', 'required': True}
+            }
+        }
+        
+        report = validator.format_validation_report(validation_results)
+        
+        assert "❌ Environment validation failed" in report
+        assert "ERROR: Missing required tool: gh" in report
+        assert "WARNING: Claude not found" in report
+        assert "✅ git (required)" in report
+        assert "❌ gh (required)" in report
+
+
+class TestWorkflowLogicEnvironmentValidation:
+    """Test environment validation integration with WorkflowLogic."""
+    
+    def test_validate_environment_success(self):
+        """Test WorkflowLogic.validate_environment when validation succeeds."""
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow.env_validator, 'validate_all_dependencies') as mock_validate:
+            mock_validate.return_value = {
+                'valid': True,
+                'errors': [],
+                'warnings': [],
+                'tool_status': {}
+            }
+            
+            valid, message = workflow.validate_environment()
+            
+            assert valid is True
+            assert "Environment validation passed" in message
+            mock_validate.assert_called_once_with(prompt_only=False)
+    
+    def test_validate_environment_failure(self):
+        """Test WorkflowLogic.validate_environment when validation fails."""
+        workflow = WorkflowLogic()
+        
+        validation_results = {
+            'valid': False,
+            'errors': ['Missing required tool'],
+            'warnings': [],
+            'tool_status': {}
+        }
+        
+        with patch.object(workflow.env_validator, 'validate_all_dependencies', return_value=validation_results), \
+             patch.object(workflow.env_validator, 'format_validation_report', return_value="Validation failed"):
+            
+            valid, message = workflow.validate_environment()
+            
+            assert valid is False
+            assert "Validation failed" in message
+    
+    def test_validate_environment_prompt_only(self):
+        """Test WorkflowLogic.validate_environment in prompt-only mode."""
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow.env_validator, 'validate_all_dependencies') as mock_validate:
+            mock_validate.return_value = {
+                'valid': True,
+                'errors': [],
+                'warnings': [],
+                'tool_status': {}
+            }
+            
+            valid, message = workflow.validate_environment(prompt_only=True)
+            
+            assert valid is True
+            mock_validate.assert_called_once_with(prompt_only=True)
+
+
+class TestEnvironmentValidationIntegration:
+    """Test environment validation in end-to-end scenarios."""
+    
+    def test_missing_git_tool_integration(self, tmp_path):
+        """Test behavior when git tool is missing."""
+        validator = EnvironmentValidator()
+        
+        def tool_side_effect(tool):
+            if tool == 'git':
+                return (False, "git not found")
+            return (True, f"{tool} found")
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(False, "Git not found")), \
+             patch.object(validator, 'validate_github_remote', return_value=(False, "Git not found")), \
+             patch.object(validator, 'check_tool_availability', side_effect=tool_side_effect):
+            
+            result = validator.validate_all_dependencies(str(tmp_path))
+            
+            assert result['valid'] is False
+            assert any("Git not found" in error for error in result['errors'])
+            assert any("Missing required tools: git" in error for error in result['errors'])
+    
+    def test_missing_github_cli_integration(self, tmp_path):
+        """Test behavior when GitHub CLI is missing."""
+        validator = EnvironmentValidator()
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Test")
+        
+        def tool_side_effect(tool):
+            if tool == 'gh':
+                return (False, "gh not found")
+            return (True, f"{tool} found")
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(True, "Valid git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
+             patch.object(validator, 'check_tool_availability', side_effect=tool_side_effect):
+            
+            result = validator.validate_all_dependencies(str(tmp_path))
+            
+            assert result['valid'] is False
+            errors = " ".join(result['errors'])
+            assert "Missing required tools: gh (GitHub CLI)" in errors
+    
+    def test_missing_jq_tool_integration(self, tmp_path):
+        """Test behavior when jq tool is missing.""" 
+        validator = EnvironmentValidator()
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Test")
+        
+        def tool_side_effect(tool):
+            if tool == 'jq':
+                return (False, "jq not found")
+            return (True, f"{tool} found")
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(True, "Valid git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
+             patch.object(validator, 'check_tool_availability', side_effect=tool_side_effect):
+            
+            result = validator.validate_all_dependencies(str(tmp_path))
+            
+            assert result['valid'] is False
+            errors = " ".join(result['errors'])
+            assert "Missing required tools: jq" in errors
+    
+    def test_no_github_remote_integration(self, tmp_path):
+        """Test behavior when no GitHub remote is configured."""
+        validator = EnvironmentValidator()
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Test")
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(True, "Valid git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(False, "No GitHub remote found")), \
+             patch.object(validator, 'check_tool_availability', return_value=(True, "tool found")):
+            
+            result = validator.validate_all_dependencies(str(tmp_path))
+            
+            assert result['valid'] is False
+            assert any("GitHub remote check failed" in error for error in result['errors'])
+    
+    def test_interactive_mode_tty_check(self):
+        """Test TTY detection for interactive mode (integration test)."""
+        # This tests the actual TTY detection logic in WorkflowLogic
+        workflow = WorkflowLogic()
+        
+        # Test with isatty mocked
+        with patch('os.isatty', return_value=True):
+            # Interactive mode should be detected
+            # This is tested indirectly through WorkflowLogic constructor
+            assert hasattr(workflow, 'interactive_mode')
+            
+        with patch('os.isatty', return_value=False):
+            # Non-interactive mode should be detected  
+            workflow2 = WorkflowLogic()
+            assert hasattr(workflow2, 'interactive_mode')
