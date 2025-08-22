@@ -753,17 +753,16 @@ class TestWorkspaceManager:
             assert is_pushed is False
 
 
-class TestGitOperations:
-    """Test git operations and environment validation."""
+class TestEnvironmentValidator:
+    """Test environment validation for git operations."""
     
-    def test_validate_git_repository(self):
-        """Test validation that we're in a git repository."""
+    def test_validate_git_repository_success(self):
+        """Test successful git repository validation."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
         validator = EnvironmentValidator()
         
         with patch('subprocess.run') as mock_run:
-            # Test successful git repository validation
             mock_run.return_value = Mock(returncode=0, stdout=".git\n", stderr="")
             
             valid, message = validator.validate_git_repository()
@@ -777,9 +776,14 @@ class TestGitOperations:
                 text=True,
                 check=False
             )
-            
-            # Test failed git repository validation
-            mock_run.reset_mock()
+    
+    def test_validate_git_repository_failure(self):
+        """Test failed git repository validation."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
+        with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=1, stderr="not a git repository")
             
             valid, message = validator.validate_git_repository()
@@ -787,252 +791,199 @@ class TestGitOperations:
             assert valid is False
             assert "Not a git repository" in message
     
-    def test_require_claude_md_file(self, tmp_path):
-        """Test that CLAUDE.md file is required."""
+    def test_validate_git_repository_file_not_found(self):
+        """Test git repository validation when git not found."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
         validator = EnvironmentValidator()
         
-        # Test when CLAUDE.md doesn't exist
-        repo_dir = tmp_path / "no_claude_md"
-        repo_dir.mkdir()
+        with patch('subprocess.run', side_effect=FileNotFoundError()):
+            valid, message = validator.validate_git_repository()
+            
+            assert valid is False
+            assert "Git not found" in message
+    
+    def test_validate_github_remote_success(self):
+        """Test successful GitHub remote validation."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        valid, message = validator.validate_claude_md_file(str(repo_dir))
+        validator = EnvironmentValidator()
         
-        assert valid is False
-        assert "CLAUDE.md not found" in message
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = Mock(returncode=0, stdout="https://github.com/user/repo.git\n", stderr="")
+            
+            valid, message = validator.validate_github_remote()
+            
+            assert valid is True
+            assert "GitHub remote" in message
+            assert "https://github.com/user/repo.git" in message
+    
+    def test_validate_github_remote_no_github(self):
+        """Test GitHub remote validation with non-GitHub remote."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        # Test when CLAUDE.md exists
-        claude_md = repo_dir / "CLAUDE.md"
+        validator = EnvironmentValidator()
+        
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = Mock(returncode=0, stdout="https://gitlab.com/user/repo.git\n", stderr="")
+            
+            valid, message = validator.validate_github_remote()
+            
+            assert valid is False
+            assert "No GitHub remote found" in message
+    
+    def test_check_claude_md_exists(self, tmp_path):
+        """Test CLAUDE.md file existence check when file exists."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
+        # Create CLAUDE.md file
+        claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Test CLAUDE.md\nProject instructions")
         
-        valid, message = validator.validate_claude_md_file(str(repo_dir))
+        valid, message = validator.check_claude_md(str(tmp_path))
         
         assert valid is True
         assert "CLAUDE.md found" in message
     
-    def test_get_github_repo_info(self, claude_tasker_script, mock_git_repo):
-        """Test extraction of GitHub repository information."""
-        with patch('subprocess.run') as mock_run:
-            def git_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
-            
-            mock_run.side_effect = git_side_effect
-            
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should not error if repo info is extracted successfully
-            assert "Could not determine repository" not in result.stderr
+    def test_check_claude_md_missing(self, tmp_path):
+        """Test CLAUDE.md file existence check when file missing."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
+        valid, message = validator.check_claude_md(str(tmp_path))
+        
+        assert valid is False
+        assert "CLAUDE.md not found" in message
     
-    def test_workspace_hygiene_warning(self, claude_tasker_script, mock_git_repo):
-        """Test workspace hygiene warnings for uncommitted changes."""
+    def test_check_tool_availability_success(self):
+        """Test successful tool availability check."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
         with patch('subprocess.run') as mock_run:
-            def git_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                elif 'git status --porcelain' in cmd:
-                    return Mock(returncode=0, stdout="M modified_file.txt\n?? untracked_file.txt", stderr="")
-                elif 'git diff --quiet' in cmd:
-                    return Mock(returncode=1, stdout="", stderr="")  # Changes present
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            mock_run.return_value = Mock(returncode=0, stdout="/usr/bin/git\n", stderr="")
             
-            mock_run.side_effect = git_side_effect
+            available, message = validator.check_tool_availability('git')
             
-            with patch('os.chdir'), patch('builtins.input', return_value='n'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should warn about uncommitted changes
-            assert result.returncode != 0 or "uncommitted changes" in result.stderr
+            assert available is True
+            assert "git found at /usr/bin/git" in message
     
-    def test_auto_cleanup_environment_variable(self, claude_tasker_script, mock_git_repo):
-        """Test CLAUDE_TASKER_AUTO_CLEANUP environment variable."""
-        with patch('subprocess.run') as mock_run, \
-             patch.dict('os.environ', {'CLAUDE_TASKER_AUTO_CLEANUP': '1'}):
-            
-            def git_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                elif 'git reset --hard' in cmd:
-                    return Mock(returncode=0, stdout="", stderr="")
-                elif 'git status --porcelain' in cmd:
-                    return Mock(returncode=0, stdout="", stderr="")
-                elif 'git diff --quiet' in cmd:
-                    return Mock(returncode=0, stdout="", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
-            
-            mock_run.side_effect = git_side_effect
-            
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should automatically clean without prompting
-            assert "git reset --hard" in str([call.args for call in mock_run.call_args_list])
-    
-    def test_branch_detection_main(self, claude_tasker_script, mock_git_repo):
-        """Test detection of main branch."""
+    def test_check_tool_availability_failure(self):
+        """Test failed tool availability check."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
         with patch('subprocess.run') as mock_run:
-            def git_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git show-ref --verify --quiet refs/heads/main' in cmd:
-                    return Mock(returncode=0, stdout="", stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            mock_run.return_value = Mock(returncode=1, stdout="", stderr="")
             
-            mock_run.side_effect = git_side_effect
+            available, message = validator.check_tool_availability('nonexistent')
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should detect main branch correctly
-            assert "main" in str([call.args for call in mock_run.call_args_list])
+            assert available is False
+            assert "nonexistent not found" in message
     
-    def test_branch_detection_master(self, claude_tasker_script, mock_git_repo):
-        """Test detection of master branch when main doesn't exist."""
-        with patch('subprocess.run') as mock_run:
-            def git_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git show-ref --verify --quiet refs/heads/main' in cmd:
-                    return Mock(returncode=1, stdout="", stderr="")  # main doesn't exist
-                elif 'git show-ref --verify --quiet refs/heads/master' in cmd:
-                    return Mock(returncode=0, stdout="", stderr="")  # master exists
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+    def test_validate_all_dependencies_success(self, tmp_path):
+        """Test comprehensive dependency validation when all pass."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
+        # Create CLAUDE.md file
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Test CLAUDE.md")
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(True, "Valid git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
+             patch.object(validator, 'check_tool_availability') as mock_tool:
             
-            mock_run.side_effect = git_side_effect
+            # Mock all tools as available
+            mock_tool.return_value = (True, "tool found")
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
+            results = validator.validate_all_dependencies(str(tmp_path))
             
-            # Should fall back to master branch
-            assert "master" in str([call.args for call in mock_run.call_args_list])
+            assert results['valid'] is True
+            assert len(results['errors']) == 0
+            assert len(results['tool_status']) > 0
     
-    def test_current_branch_detection(self, claude_tasker_script, mock_git_repo):
-        """Test detection of current branch."""
-        with patch('subprocess.run') as mock_run:
-            def git_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git branch --show-current' in cmd:
-                    return Mock(returncode=0, stdout="feature-branch", stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+    def test_validate_all_dependencies_failures(self, tmp_path):
+        """Test comprehensive dependency validation when some fail."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
+        with patch.object(validator, 'validate_git_repository', return_value=(False, "Not a git repository")), \
+             patch.object(validator, 'validate_github_remote', return_value=(False, "No GitHub remote")), \
+             patch.object(validator, 'check_claude_md', return_value=(False, "CLAUDE.md not found")), \
+             patch.object(validator, 'check_tool_availability', return_value=(False, "tool not found")):
             
-            mock_run.side_effect = git_side_effect
+            results = validator.validate_all_dependencies(str(tmp_path))
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should detect current branch
-            assert "feature-branch" in str([call.args for call in mock_run.call_args_list])
+            assert results['valid'] is False
+            assert len(results['errors']) > 0
+            assert "Git repository check failed" in results['errors'][0]
     
-    def test_git_log_commit_history(self, claude_tasker_script, mock_git_repo):
-        """Test retrieval of git commit history."""
-        with patch('subprocess.run') as mock_run:
-            def git_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git log --oneline' in cmd:
-                    return Mock(returncode=0, stdout="abc123 Test commit\ndef456 Another commit", stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
-            
-            mock_run.side_effect = git_side_effect
-            
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should retrieve commit history
-            assert "git log --oneline" in str([call.args for call in mock_run.call_args_list])
+    def test_get_missing_dependencies(self):
+        """Test extraction of missing required dependencies."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
+        validation_results = {
+            'tool_status': {
+                'git': {'available': True, 'required': True},
+                'gh': {'available': False, 'required': True},
+                'claude': {'available': False, 'required': False}
+            }
+        }
+        
+        missing = validator.get_missing_dependencies(validation_results)
+        
+        assert 'gh' in missing
+        assert 'git' not in missing
+        assert 'claude' not in missing  # Not required
     
-    def test_git_status_changes_detection(self, claude_tasker_script, mock_git_repo):
-        """Test detection of git status changes."""
-        with patch('subprocess.run') as mock_run:
-            def git_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git status --porcelain' in cmd:
-                    return Mock(returncode=0, stdout="M file1.txt\nA file2.txt\nD file3.txt", stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
-            
-            mock_run.side_effect = git_side_effect
-            
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should detect file changes
-            git_status_calls = [call for call in mock_run.call_args_list 
-                              if 'git status --porcelain' in str(call.args)]
-            assert len(git_status_calls) > 0
+    def test_format_validation_report_success(self):
+        """Test formatting of successful validation report."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
+        validation_results = {
+            'valid': True,
+            'errors': [],
+            'warnings': [],
+            'tool_status': {
+                'git': {'available': True, 'status': 'found', 'required': True}
+            }
+        }
+        
+        report = validator.format_validation_report(validation_results)
+        
+        assert "✅ Environment validation passed" in report
+        assert "✅ git (required): found" in report
+    
+    def test_format_validation_report_failure(self):
+        """Test formatting of failed validation report."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
+        validation_results = {
+            'valid': False,
+            'errors': ['Git repository check failed'],
+            'warnings': ['Warning: claude not found'],
+            'tool_status': {
+                'git': {'available': False, 'status': 'not found', 'required': True}
+            }
+        }
+        
+        report = validator.format_validation_report(validation_results)
+        
+        assert "❌ Environment validation failed" in report
+        assert "ERROR: Git repository check failed" in report
+        assert "WARNING: Warning: claude not found" in report
+        assert "❌ git (required): not found" in report
