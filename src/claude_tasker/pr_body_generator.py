@@ -1,10 +1,8 @@
 """PR body generation module with template detection and context aggregation."""
 
-import os
-import json
 import subprocess
 import tempfile
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from pathlib import Path
 from .github_client import IssueData
 
@@ -101,16 +99,13 @@ class PRBodyGenerator:
             return stats
         
         lines = git_diff.split('\n')
-        current_file_status = None
         
         for line in lines:
             if line.startswith('diff --git'):
-                current_file_status = 'modified'
+                pass  # Just tracking file boundaries
             elif line.startswith('new file mode'):
-                current_file_status = 'added'
                 stats['files_added'] += 1
             elif line.startswith('deleted file mode'):
-                current_file_status = 'deleted'
                 stats['files_deleted'] += 1
             elif line.startswith('+') and not line.startswith('+++'):
                 stats['lines_added'] += 1
@@ -118,7 +113,7 @@ class PRBodyGenerator:
                 stats['lines_deleted'] += 1
         
         # Count modified files (files that are neither added nor deleted)
-        total_files = len([l for l in lines if l.startswith('diff --git')])
+        total_files = len([line for line in lines if line.startswith('diff --git')])
         stats['files_modified'] = total_files - stats['files_added'] - stats['files_deleted']
         
         return stats
@@ -177,7 +172,7 @@ class PRBodyGenerator:
         """Build prompt for PR body generation."""
         prompt_parts = [
             "Generate a comprehensive PR body for the following changes:",
-            f"\n## Issue Context",
+            "\n## Issue Context",
             f"Issue #{context['issue']['number']}: {context['issue']['title']}",
             f"Issue Body: {context['issue']['body']}",
             f"Issue Labels: {', '.join(context['issue']['labels']) if context['issue']['labels'] else 'None'}",
@@ -186,7 +181,7 @@ class PRBodyGenerator:
         if context['changes']['diff_summary']:
             summary = context['changes']['diff_summary']
             prompt_parts.extend([
-                f"\n## Changes Summary",
+                "\n## Changes Summary",
                 f"Branch: {context['changes']['branch']}",
                 f"Files changed: {summary['files_changed']}",
                 f"Lines: +{summary['additions']}/-{summary['deletions']}",
@@ -197,18 +192,18 @@ class PRBodyGenerator:
         
         if context['changes']['commit_log']:
             prompt_parts.extend([
-                f"\n## Commit History",
+                "\n## Commit History",
                 context['changes']['commit_log']
             ])
         
         if template:
             prompt_parts.extend([
-                f"\n## PR Template to Follow",
+                "\n## PR Template to Follow",
                 template
             ])
         
         prompt_parts.extend([
-            f"\n## Instructions",
+            "\n## Instructions",
             "Create a clear, professional PR body that:",
             "1. Summarizes the changes made",
             "2. References the related issue",
@@ -256,10 +251,10 @@ class PRBodyGenerator:
     def _create_fallback_pr_body(self, context: Dict[str, Any], template: Optional[str] = None) -> str:
         """Create a basic PR body when AI generation fails."""
         parts = [
-            f"## Summary",
+            "## Summary",
             f"This PR addresses issue #{context['issue']['number']}: {context['issue']['title']}",
-            f"",
-            f"## Changes",
+            "",
+            "## Changes",
         ]
         
         stats = context.get('stats', {})
@@ -278,15 +273,15 @@ class PRBodyGenerator:
             parts.append(f"- {stats['lines_added']} lines added, {stats['lines_deleted']} lines deleted")
         
         parts.extend([
-            f"",
-            f"## Related Issue",
+            "",
+            "## Related Issue",
             f"Fixes #{context['issue']['number']}",
-            f"",
-            f"## Testing",
-            f"- [ ] Manual testing completed",
-            f"- [ ] Automated tests pass",
-            f"",
-            f"🤖 Generated with [Claude Code](https://claude.ai/code)"
+            "",
+            "## Testing",
+            "- [ ] Manual testing completed",
+            "- [ ] Automated tests pass",
+            "",
+            "🤖 Generated with [Claude Code](https://claude.ai/code)"
         ])
         
         return "\n".join(parts)

@@ -3,7 +3,7 @@
 import subprocess
 import json
 import tempfile
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any
 from pathlib import Path
 from .github_client import IssueData, PRData
 
@@ -145,9 +145,7 @@ Provide your analysis and create a well-structured GitHub issue with:
             # Build command based on tool
             if tool_name == 'llm':
                 cmd = [
-                    'llm', 'prompt', prompt_file,
-                    '--max-tokens', str(max_tokens),
-                    '--output-format', 'json'
+                    'llm', 'prompt', prompt_file
                 ]
             elif tool_name == 'claude':
                 cmd = [
@@ -158,13 +156,23 @@ Provide your analysis and create a well-structured GitHub issue with:
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
             
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            # Run with timeout to prevent hanging
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
             
             if result.returncode == 0:
-                return json.loads(result.stdout)
+                try:
+                    return json.loads(result.stdout)
+                except json.JSONDecodeError:
+                    # Fallback: wrap plain text response
+                    return {
+                        'result': result.stdout.strip(),
+                        'optimized_prompt': result.stdout.strip()
+                    }
             else:
                 return None
                 
+        except subprocess.TimeoutExpired:
+            return None
         except (FileNotFoundError, json.JSONDecodeError, Exception):
             return None
         finally:

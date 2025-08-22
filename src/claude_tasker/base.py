@@ -1,7 +1,7 @@
 """Base classes for consistent command execution and error handling."""
 
 import subprocess
-from typing import List, Tuple, Optional, Any
+from typing import List, Tuple
 
 
 class CommandExecutor:

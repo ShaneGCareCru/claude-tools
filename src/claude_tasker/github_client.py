@@ -3,7 +3,7 @@
 import subprocess
 import json
 import time
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
 
@@ -82,7 +82,7 @@ class GitHubClient:
                 
                 return result
                 
-            except Exception as e:
+            except Exception:
                 if attempt == self.retry_attempts - 1:
                     raise
                 time.sleep(self.base_delay * (2 ** attempt))
