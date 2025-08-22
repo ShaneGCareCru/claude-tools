@@ -143,7 +143,7 @@ Keep the response focused and practical. Format as markdown."""
                     return None
                     
             elif tool_name == 'claude':
-                cmd = ['claude', '--print', '--output-format', 'json']
+                cmd = ['claude']
                 
                 result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False)
                 
@@ -263,7 +263,7 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
             else:
                 prompt_result = llm_result
             
-            optimized_prompt = prompt_result.get('optimized_prompt', '')
+            optimized_prompt = prompt_result.get('response', '')
             if not optimized_prompt:
                 results['error'] = "No optimized prompt in response"
                 return results

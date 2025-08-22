@@ -144,13 +144,17 @@ Claude Tools uses a sophisticated multi-stage approach across both implementatio
 - Agent-based prompt generation
 
 **Python (`claude-tasker-py`)**
-- Modular object-oriented architecture:
-  - `cli.py` - Command-line interface and argument parsing
-  - `workflow_logic.py` - Core orchestration and task management
-  - `prompt_builder.py` - LLM prompt generation and execution
-  - `github_client.py` - GitHub API integration
-  - `environment_validator.py` - Dependency and environment checking
-  - `workspace_manager.py` - Git and file system operations
+- Modular object-oriented architecture with enhanced error handling:
+  - `cli.py` - Command-line interface and argument parsing with comprehensive validation
+  - `workflow_logic.py` - Core orchestration, task management, and two-stage execution
+  - `prompt_builder.py` - LLM prompt generation, execution, and Claude CLI integration
+  - `github_client.py` - GitHub API integration with rate limiting and error recovery
+  - `environment_validator.py` - Dependency validation and environment checking
+  - `workspace_manager.py` - Git operations, branch management, and file system utilities
+- **Two-Stage Execution**: Meta-prompt generation → Optimized prompt execution
+- **Enhanced Validation**: Input validation, environment checks, and status verification
+- **Error Recovery**: Automatic fallback between Claude CLI and LLM tools
+- **Comprehensive Testing**: Unit tests, integration tests, and mocking support
 
 ### Agent System
 
