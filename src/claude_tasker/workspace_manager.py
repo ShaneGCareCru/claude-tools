@@ -156,19 +156,28 @@ class WorkspaceManager:
     
     def has_changes_to_commit(self) -> bool:
         """Check if there are staged or unstaged changes."""
+        print("[DEBUG] Checking for git changes...")
+        
         # Check for unstaged changes
         result = self._run_git_command(['diff', '--quiet'])
+        print(f"[DEBUG] Unstaged changes check (git diff --quiet): return code {result.returncode}")
         if result.returncode != 0:
+            print("[DEBUG] Found unstaged changes")
             return True
         
         # Check for staged changes
         result = self._run_git_command(['diff', '--cached', '--quiet'])
+        print(f"[DEBUG] Staged changes check (git diff --cached --quiet): return code {result.returncode}")
         if result.returncode != 0:
+            print("[DEBUG] Found staged changes")
             return True
         
         # Check for untracked files
         result = self._run_git_command(['ls-files', '--others', '--exclude-standard'])
-        if result.returncode == 0 and result.stdout.strip():
+        untracked = result.stdout.strip() if result.returncode == 0 else ""
+        print(f"[DEBUG] Untracked files check: {len(untracked)} chars of output")
+        if untracked:
+            print(f"[DEBUG] Found untracked files: {untracked[:200]}...")
             return True
         
         return False

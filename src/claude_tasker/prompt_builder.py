@@ -124,33 +124,59 @@ Keep the response focused and practical. Format as markdown."""
         
         return prompt
     
-    def _execute_llm_tool(self, tool_name: str, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
-        """Generic LLM tool execution with common logic."""
-        prompt_file = None
+    def _execute_llm_tool(self, tool_name: str, prompt: str, max_tokens: int = 4000, execute_mode: bool = False) -> Optional[Dict[str, Any]]:
+        """Generic LLM tool execution with common logic.
+        
+        Args:
+            tool_name: The LLM tool to use ('llm' or 'claude')
+            prompt: The prompt text
+            max_tokens: Maximum tokens for response
+            execute_mode: If True, actually execute the prompt with Claude (not just print)
+        """
+        print(f"[DEBUG] _execute_llm_tool called with tool={tool_name}, execute_mode={execute_mode}")
         try:
             # Build command based on tool
             if tool_name == 'llm':
-                # LLM tool still uses file-based approach
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                    f.write(prompt)
-                    prompt_file = f.name
+                # LLM tool uses stdin for prompts
+                print("[DEBUG] Using llm tool")
                 cmd = [
-                    'llm', 'prompt', prompt_file
+                    'llm', 'prompt', '-'
                 ]
             elif tool_name == 'claude':
-                # Claude CLI takes prompt as direct argument, not file
-                cmd = [
-                    'claude', '--print',
-                    '--output-format', 'json',
-                    prompt
-                ]
+                if execute_mode:
+                    # Actually execute with Claude to make code changes
+                    print("[DEBUG] Executing Claude in implementation mode")
+                    print(f"[DEBUG] Prompt preview (first 200 chars): {prompt[:200]}...")
+                    # Use headless mode (-p) with permission bypass for autonomous execution
+                    cmd = [
+                        'claude', '-p', '--permission-mode', 'bypassPermissions'
+                    ]
+                else:
+                    # Just generate/print prompt
+                    print("[DEBUG] Running Claude in prompt generation mode")
+                    cmd = [
+                        'claude', '--print',
+                        '--output-format', 'json',
+                        prompt
+                    ]
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
             
             # Run with timeout to prevent hanging
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
+            # Pass prompt via stdin for both llm and claude execute mode
+            if tool_name == 'llm' or (tool_name == 'claude' and execute_mode):
+                print(f"[DEBUG] Running command: {' '.join(cmd)}")
+                print(f"[DEBUG] Passing prompt via stdin ({len(prompt)} chars)")
+                timeout_val = 180 if execute_mode else 120
+                result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False, timeout=timeout_val)
+            else:
+                result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
             
             if result.returncode == 0:
+                if execute_mode:
+                    print(f"[DEBUG] Claude execution completed successfully")
+                    print(f"[DEBUG] Output length: {len(result.stdout)} chars")
+                    print(f"[DEBUG] Output preview: {result.stdout[:500]}...")
                 try:
                     return json.loads(result.stdout)
                 except json.JSONDecodeError:
@@ -160,24 +186,30 @@ Keep the response focused and practical. Format as markdown."""
                         'optimized_prompt': result.stdout.strip()
                     }
             else:
+                print(f"[DEBUG] Command failed with return code {result.returncode}")
+                print(f"[DEBUG] stderr: {result.stderr[:500]}")
                 return None
                 
         except subprocess.TimeoutExpired:
+            print("[DEBUG] Command timed out")
             return None
-        except (FileNotFoundError, json.JSONDecodeError, Exception):
+        except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
+            print(f"[DEBUG] Error: {e}")
             return None
-        finally:
-            # Ensure cleanup even on exception (only for LLM tool which uses temp files)
-            if prompt_file and Path(prompt_file).exists():
-                Path(prompt_file).unlink()
     
     def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
         """Build prompt using LLM CLI tool."""
         return self._execute_llm_tool('llm', prompt, max_tokens)
     
-    def build_with_claude(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
-        """Build prompt using Claude CLI tool."""
-        return self._execute_llm_tool('claude', prompt, max_tokens)
+    def build_with_claude(self, prompt: str, max_tokens: int = 4000, execute_mode: bool = False) -> Optional[Dict[str, Any]]:
+        """Build prompt using Claude CLI tool.
+        
+        Args:
+            prompt: The prompt text
+            max_tokens: Maximum tokens for response
+            execute_mode: If True, actually execute the prompt (make code changes)
+        """
+        return self._execute_llm_tool('claude', prompt, max_tokens, execute_mode)
     
     def validate_meta_prompt(self, meta_prompt: str) -> bool:
         """Validate meta-prompt to prevent infinite loops."""
@@ -273,8 +305,11 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
             
             # Stage 3: Execute optimized prompt (if not prompt-only mode)
             if not prompt_only:
-                execution_result = self.build_with_claude(optimized_prompt)
+                print("[DEBUG] Stage 3: Executing optimized prompt with Claude")
+                print(f"[DEBUG] Prompt length: {len(optimized_prompt)} characters")
+                execution_result = self.build_with_claude(optimized_prompt, execute_mode=True)
                 results['execution_result'] = execution_result
+                print(f"[DEBUG] Execution result: {execution_result is not None}")
             
             results['success'] = True
             return results

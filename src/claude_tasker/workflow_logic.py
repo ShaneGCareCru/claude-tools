@@ -158,7 +158,11 @@ class WorkflowLogic:
                 )
             
             # Check if there are changes to commit
-            if self.workspace_manager.has_changes_to_commit():
+            print("[DEBUG] Checking for git changes after Claude execution")
+            has_changes = self.workspace_manager.has_changes_to_commit()
+            print(f"[DEBUG] Git has changes: {has_changes}")
+            
+            if has_changes:
                 # Commit changes
                 commit_msg = "automated implementation via agent coordination"
                 if not self.workspace_manager.commit_changes(commit_msg, branch_name):
