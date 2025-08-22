@@ -138,20 +138,21 @@ Provide your analysis and create a well-structured GitHub issue with:
         """Generic LLM tool execution with common logic."""
         prompt_file = None
         try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(prompt)
-                prompt_file = f.name
-            
             # Build command based on tool
             if tool_name == 'llm':
+                # LLM tool still uses file-based approach
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                    f.write(prompt)
+                    prompt_file = f.name
                 cmd = [
                     'llm', 'prompt', prompt_file
                 ]
             elif tool_name == 'claude':
+                # Claude CLI takes prompt as direct argument, not file
                 cmd = [
-                    'claude', '--file', prompt_file,
-                    '--max-tokens', str(max_tokens),
-                    '--output-format', 'json'
+                    'claude', '--print',
+                    '--output-format', 'json',
+                    prompt
                 ]
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
@@ -176,7 +177,7 @@ Provide your analysis and create a well-structured GitHub issue with:
         except (FileNotFoundError, json.JSONDecodeError, Exception):
             return None
         finally:
-            # Ensure cleanup even on exception
+            # Ensure cleanup even on exception (only for LLM tool which uses temp files)
             if prompt_file and Path(prompt_file).exists():
                 Path(prompt_file).unlink()
     
