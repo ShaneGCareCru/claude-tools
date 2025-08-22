@@ -753,45 +753,63 @@ class TestWorkspaceManager:
             assert is_pushed is False
 
 
-@pytest.mark.skip(reason="Legacy bash script tests - replaced by WorkspaceManager tests above")
 class TestGitOperations:
-    """Test git operations and workspace management."""
+    """Test git operations and environment validation."""
     
-    def test_validate_git_repository(self, claude_tasker_script, mock_git_repo):
+    def test_validate_git_repository(self):
         """Test validation that we're in a git repository."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
         with patch('subprocess.run') as mock_run:
-            # Mock git rev-parse to fail (not a git repo)
+            # Test successful git repository validation
+            mock_run.return_value = Mock(returncode=0, stdout=".git\n", stderr="")
+            
+            valid, message = validator.validate_git_repository()
+            
+            assert valid is True
+            assert "Valid git repository" in message
+            mock_run.assert_called_once_with(
+                ['git', 'rev-parse', '--git-dir'],
+                cwd=".",
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            
+            # Test failed git repository validation
+            mock_run.reset_mock()
             mock_run.return_value = Mock(returncode=1, stderr="not a git repository")
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
+            valid, message = validator.validate_git_repository()
             
-            assert result.returncode != 0
-            assert "not a git repository" in result.stderr or "git repository" in result.stderr
+            assert valid is False
+            assert "Not a git repository" in message
     
-    def test_require_claude_md_file(self, claude_tasker_script, tmp_path):
+    def test_require_claude_md_file(self, tmp_path):
         """Test that CLAUDE.md file is required."""
+        from src.claude_tasker.environment_validator import EnvironmentValidator
+        
+        validator = EnvironmentValidator()
+        
+        # Test when CLAUDE.md doesn't exist
         repo_dir = tmp_path / "no_claude_md"
         repo_dir.mkdir()
         
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = Mock(returncode=0, stdout=".git", stderr="")
-            
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=repo_dir,
-                    capture_output=True,
-                    text=True
-                )
-            
-            assert result.returncode != 0
-            assert "CLAUDE.md" in result.stderr
+        valid, message = validator.validate_claude_md_file(str(repo_dir))
+        
+        assert valid is False
+        assert "CLAUDE.md not found" in message
+        
+        # Test when CLAUDE.md exists
+        claude_md = repo_dir / "CLAUDE.md"
+        claude_md.write_text("# Test CLAUDE.md\nProject instructions")
+        
+        valid, message = validator.validate_claude_md_file(str(repo_dir))
+        
+        assert valid is True
+        assert "CLAUDE.md found" in message
     
     def test_get_github_repo_info(self, claude_tasker_script, mock_git_repo):
         """Test extraction of GitHub repository information."""
