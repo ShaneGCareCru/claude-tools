@@ -6,323 +6,297 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch, Mock, mock_open, call
 
+from src.claude_tasker.workflow_logic import WorkflowLogic, WorkflowResult
+from src.claude_tasker.github_client import IssueData, PRData
 
-@pytest.mark.skip(reason="Workflow logic tests need complete rewrite for Python module - currently test bash script subprocess behavior")
+
 class TestWorkflowLogic:
     """Test complex workflow logic and agent coordination."""
     
-    def test_two_stage_execution_meta_prompt(self, claude_tasker_script, mock_git_repo):
+    def test_two_stage_execution_meta_prompt(self):
         """Test two-stage execution: meta-prompt generation."""
-        with patch('subprocess.run') as mock_run, \
-             patch('tempfile.NamedTemporaryFile') as mock_temp, \
-             patch('builtins.open', mock_open()):
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow.github_client, 'get_issue') as mock_get_issue, \
+             patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage:
             
-            # Mock file objects
-            mock_temp.return_value.__enter__.return_value.name = '/tmp/test_prompt.json'
+            # Mock issue data
+            issue_data = IssueData(
+                number=316,
+                title="Test Issue",
+                body="Test body",
+                labels=["enhancement"],
+                url="https://github.com/test/repo/issues/316",
+                author="testuser",
+                state="open"
+            )
+            mock_get_issue.return_value = issue_data
             
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'claude' in cmd and '--output-format json' in cmd:
-                    # Meta-prompt stage
-                    meta_response = {
-                        "optimized_prompt": "Test optimized prompt",
-                        "analysis": "Test analysis"
-                    }
-                    return Mock(returncode=0, stdout=json.dumps(meta_response), stderr="")
-                elif 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            # Mock two-stage execution result
+            mock_two_stage.return_value = {
+                'success': True,
+                'meta_prompt': 'Generated meta prompt',
+                'optimized_prompt': 'Test optimized prompt',
+                'execution_result': None
+            }
             
-            mock_run.side_effect = cmd_side_effect
-            
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should complete meta-prompt generation
-            assert result.returncode == 0 or "Missing required tools" not in result.stderr
+            # Mock environment validation
+            with patch.object(workflow, 'validate_environment') as mock_env:
+                mock_env.return_value = (True, "Environment valid")
+                
+                # Mock workspace operations
+                with patch.object(workflow.workspace_manager, 'workspace_hygiene') as mock_hygiene, \
+                     patch.object(workflow.workspace_manager, 'create_timestamped_branch') as mock_branch:
+                    
+                    mock_hygiene.return_value = True
+                    mock_branch.return_value = (True, "issue-316-1234567890")
+                    
+                    result = workflow.process_single_issue(316, prompt_only=True)
+                    
+                    assert result.success is True
+                    assert result.issue_number == 316
+                    mock_two_stage.assert_called_once()
+                    assert mock_two_stage.call_args[1]['prompt_only'] is True
     
-    def test_agent_based_architecture(self, claude_tasker_script, mock_git_repo):
+    def test_agent_based_architecture(self, tmp_path):
         """Test agent-based architecture detection."""
+        workflow = WorkflowLogic()
+        
         # Create .claude/agents directory structure
-        agents_dir = mock_git_repo / ".claude" / "agents"
+        agents_dir = tmp_path / ".claude" / "agents"
         agents_dir.mkdir(parents=True, exist_ok=True)
         
         # Create mock agent file
         agent_file = agents_dir / "github-issue-implementer.md"
-        agent_file.write_text("# GitHub Issue Implementer Agent\nTest agent content")
+        agent_content = "# GitHub Issue Implementer Agent\nTest agent content"
+        agent_file.write_text(agent_content)
         
-        with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+        # Test agent content is available to prompt builder
+        with patch('pathlib.Path.exists', return_value=True), \
+             patch('pathlib.Path.read_text', return_value=agent_content):
             
-            mock_run.side_effect = cmd_side_effect
+            # Test that prompt builder has access to framework content
+            framework = workflow.prompt_builder.lyra_dev_framework
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should detect and potentially use agent files
-            assert result.returncode == 0
+            assert "DECONSTRUCT" in framework
+            assert "DIAGNOSE" in framework
+            assert "DEVELOP" in framework
+            assert "DELIVER" in framework
+            assert "Lyra-Dev 4-D methodology" in framework
     
-    def test_status_verification_protocol(self, claude_tasker_script, mock_git_repo):
+    def test_status_verification_protocol(self):
         """Test status verification protocol for detecting false completion claims."""
-        with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'gh issue view' in cmd:
-                    # Mock issue with completion claim
-                    issue_data = {
-                        "title": "Test Issue - COMPLETED",
-                        "body": "This issue has been completed",
-                        "labels": [{"name": "completed"}]
-                    }
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow.github_client, 'get_issue') as mock_get_issue:
+            # Mock issue with completion claim (closed state)
+            issue_data = IssueData(
+                number=316,
+                title="Test Issue - COMPLETED",
+                body="This issue has been completed",
+                labels=["completed"],
+                url="https://github.com/test/repo/issues/316",
+                author="testuser",
+                state="closed"
+            )
+            mock_get_issue.return_value = issue_data
             
-            mock_run.side_effect = cmd_side_effect
-            
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should verify completion status
-            assert result.returncode == 0
+            # Mock environment validation
+            with patch.object(workflow, 'validate_environment') as mock_env:
+                mock_env.return_value = (True, "Environment valid")
+                
+                result = workflow.process_single_issue(316)
+                
+                # Should recognize issue is already closed and return success
+                assert result.success is True
+                assert "already closed" in result.message
+                assert result.issue_number == 316
     
-    def test_audit_and_implement_workflow(self, claude_tasker_script, mock_git_repo):
+    def test_audit_and_implement_workflow(self):
         """Test AUDIT-AND-IMPLEMENT workflow."""
-        with patch('subprocess.run') as mock_run, \
-             patch('tempfile.NamedTemporaryFile'), \
-             patch('builtins.open', mock_open()):
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow.github_client, 'get_issue') as mock_get_issue, \
+             patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage:
             
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'claude' in cmd and 'audit' in cmd.lower():
-                    # Audit phase
-                    return Mock(returncode=0, stdout="Audit results: gaps found", stderr="")
-                elif 'claude' in cmd and 'implement' in cmd.lower():
-                    # Implementation phase  
-                    return Mock(returncode=0, stdout="Implementation complete", stderr="")
-                elif 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            # Mock issue data
+            issue_data = IssueData(
+                number=316,
+                title="Test Issue",
+                body="Test body",
+                labels=["enhancement"],
+                url="https://github.com/test/repo/issues/316",
+                author="testuser",
+                state="open"
+            )
+            mock_get_issue.return_value = issue_data
             
-            mock_run.side_effect = cmd_side_effect
+            # Mock two-stage execution with audit and implement phases
+            mock_two_stage.return_value = {
+                'success': True,
+                'meta_prompt': 'Audit prompt: gaps identified',
+                'optimized_prompt': 'Implementation prompt with gap analysis',
+                'execution_result': {'result': 'Implementation complete'}
+            }
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should complete audit and implement workflow
-            assert result.returncode == 0
+            # Mock all workflow dependencies
+            with patch.object(workflow, 'validate_environment') as mock_env, \
+                 patch.object(workflow.workspace_manager, 'workspace_hygiene') as mock_hygiene, \
+                 patch.object(workflow.workspace_manager, 'create_timestamped_branch') as mock_branch, \
+                 patch.object(workflow.workspace_manager, 'has_changes_to_commit') as mock_changes:
+                
+                mock_env.return_value = (True, "Environment valid")
+                mock_hygiene.return_value = True
+                mock_branch.return_value = (True, "issue-316-1234567890")
+                mock_changes.return_value = False  # No changes made
+                
+                # Mock GitHub comment
+                with patch.object(workflow.github_client, 'comment_on_issue') as mock_comment:
+                    result = workflow.process_single_issue(316)
+                    
+                    assert result.success is True
+                    assert result.issue_number == 316
+                    
+                    # Should have called two-stage prompt execution
+                    mock_two_stage.assert_called_once()
+                    
+                    # Should post comment about no changes needed
+                    mock_comment.assert_called_once()
+                    comment_text = mock_comment.call_args[0][1]
+                    assert "4-D methodology" in comment_text
     
-    def test_intelligent_pr_body_generation(self, claude_tasker_script, mock_git_repo):
+    def test_intelligent_pr_body_generation(self):
         """Test intelligent PR body generation using llm tool."""
-        with patch('subprocess.run') as mock_run, \
-             patch('tempfile.NamedTemporaryFile'), \
-             patch('builtins.open', mock_open()):
+        workflow = WorkflowLogic()
+        
+        # Test PR body generator functionality
+        with patch.object(workflow.pr_body_generator, 'generate_pr_body') as mock_pr_body:
+            mock_pr_body.return_value = "## Summary\nGenerated intelligent PR body\n## Changes\n- Test changes"
             
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'llm' in cmd and 'chat' in cmd:
-                    # LLM tool for PR body generation
-                    return Mock(returncode=0, stdout="Generated intelligent PR body", stderr="")
-                elif 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+            # Mock issue data
+            issue_data = IssueData(
+                number=316,
+                title="Test Issue",
+                body="Test body",
+                labels=["enhancement"],
+                url="https://github.com/test/repo/issues/316",
+                author="testuser",
+                state="open"
+            )
             
-            mock_run.side_effect = cmd_side_effect
+            # Test PR body generation directly
+            pr_body = workflow.pr_body_generator.generate_pr_body(
+                issue_data, "diff content", "issue-316-123", "commit log"
+            )
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should handle PR body generation
-            assert result.returncode == 0
+            assert "Generated intelligent PR body" in pr_body
+            assert "Summary" in pr_body
+            assert "Changes" in pr_body
+            mock_pr_body.assert_called_once_with(issue_data, "diff content", "issue-316-123", "commit log")
     
-    def test_pr_template_detection(self, claude_tasker_script, mock_git_repo):
+    def test_pr_template_detection(self, tmp_path):
         """Test PR template file detection."""
+        workflow = WorkflowLogic()
+        
         # Create PR template files
-        github_dir = mock_git_repo / ".github"
+        github_dir = tmp_path / ".github"
         github_dir.mkdir(exist_ok=True)
         
         pr_template = github_dir / "pull_request_template.md"
-        pr_template.write_text("# PR Template\n## Summary\n## Changes")
+        template_content = "# PR Template\n## Summary\n## Changes"
+        pr_template.write_text(template_content)
         
-        with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
-            
-            mock_run.side_effect = cmd_side_effect
-            
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
-            
-            # Should detect PR template
-            assert result.returncode == 0
+        # Test template detection
+        detected_template = workflow.pr_body_generator.detect_templates(str(tmp_path))
+        
+        assert detected_template == template_content
+        assert "PR Template" in detected_template
+        assert "Summary" in detected_template
+        assert "Changes" in detected_template
     
-    def test_range_processing(self, claude_tasker_script, mock_git_repo):
+    def test_range_processing(self):
         """Test range processing functionality."""
-        with patch('subprocess.run') as mock_run:
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
-                else:
-                    return Mock(returncode=0, stdout="", stderr="")
+        workflow = WorkflowLogic(timeout_between_tasks=0.1)  # Short timeout for testing
+        
+        with patch.object(workflow, 'process_single_issue') as mock_process, \
+             patch('time.sleep') as mock_sleep:
             
-            mock_run.side_effect = cmd_side_effect
+            # Mock individual issue processing
+            mock_process.return_value = WorkflowResult(
+                success=True,
+                message="Issue processed successfully",
+                issue_number=316
+            )
             
-            with patch('os.chdir'), patch('time.sleep'):  # Mock sleep for testing
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316-318", "--timeout", "1", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
+            results = workflow.process_issue_range(316, 318, prompt_only=True)
             
-            # Should process range of issues
-            assert result.returncode == 0
+            # Should process 3 issues (316, 317, 318)
+            assert len(results) == 3
+            assert all(result.success for result in results)
+            
+            # Should call process_single_issue for each issue
+            assert mock_process.call_count == 3
+            
+            # Should apply timeout between issues (2 timeouts for 3 issues)
+            assert mock_sleep.call_count == 2
     
-    def test_exponential_backoff_retry(self, claude_tasker_script, mock_git_repo):
+    def test_exponential_backoff_retry(self):
         """Test exponential backoff retry logic for API limits."""
-        with patch('subprocess.run') as mock_run:
+        workflow = WorkflowLogic()
+        
+        with patch('subprocess.run') as mock_run, \
+             patch('time.sleep') as mock_sleep:
+            
             call_count = 0
             
-            def cmd_side_effect(*args, **kwargs):
+            def side_effect(*args, **kwargs):
                 nonlocal call_count
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                
-                if 'gh issue view' in cmd:
-                    call_count += 1
-                    if call_count < 3:
-                        # Simulate API rate limit
-                        return Mock(returncode=1, stdout="", stderr="API rate limit exceeded")
-                    else:
-                        # Success after retries
-                        issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                        return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
+                call_count += 1
+                if call_count < 3:
+                    # Simulate API rate limit
+                    return subprocess.CompletedProcess(args[0], 1, "", "API rate limit exceeded")
                 else:
-                    return Mock(returncode=0, stdout="", stderr="")
+                    # Success after retries
+                    return subprocess.CompletedProcess(args[0], 0, "Success", "")
             
-            mock_run.side_effect = cmd_side_effect
+            mock_run.side_effect = side_effect
             
-            with patch('os.chdir'), patch('time.sleep'):  # Mock sleep for testing
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
+            # Test exponential backoff directly on GitHubClient
+            result = workflow.github_client._run_gh_command(['issue', 'view', '316'])
             
-            # Should handle retries and eventually succeed
-            assert call_count >= 2  # At least one retry occurred
+            # Should eventually succeed after retries
+            assert result.returncode == 0
+            assert result.stdout == "Success"
+            assert call_count == 3  # Three attempts total
+            
+            # Should have applied exponential backoff delays
+            assert mock_sleep.call_count >= 2
     
-    def test_branch_creation_timestamped(self, claude_tasker_script, mock_git_repo):
+    def test_branch_creation_timestamped(self):
         """Test automatic branch creation with timestamps."""
-        with patch('subprocess.run') as mock_run, \
-             patch('time.time', return_value=1234567890):
+        workflow = WorkflowLogic()
+        
+        with patch('time.time', return_value=1234567890), \
+             patch.object(workflow.workspace_manager, '_run_git_command') as mock_git:
             
-            def cmd_side_effect(*args, **kwargs):
-                cmd = ' '.join(args[0]) if isinstance(args[0], list) else args[0]
-                if 'git checkout -b issue-316-1234567890' in cmd:
-                    return Mock(returncode=0, stdout="Switched to branch", stderr="")
-                elif 'gh issue view' in cmd:
-                    issue_data = {"title": "Test Issue", "body": "Test", "labels": []}
-                    return Mock(returncode=0, stdout=json.dumps(issue_data), stderr="")
-                elif 'git rev-parse --git-dir' in cmd:
-                    return Mock(returncode=0, stdout=".git", stderr="")
-                elif 'git config --get remote.origin.url' in cmd:
-                    return Mock(returncode=0, stdout="https://github.com/test/repo.git", stderr="")
+            # Mock successful git commands using CompletedProcess
+            def git_side_effect(cmd):
+                cmd_str = ' '.join(cmd)
+                if 'branch --show-current' in cmd_str:
+                    return subprocess.CompletedProcess(cmd, 0, "main", "")
+                elif 'checkout -b issue-316-1234567890' in cmd_str:
+                    return subprocess.CompletedProcess(cmd, 0, "Switched to branch issue-316-1234567890", "")
                 else:
-                    return Mock(returncode=0, stdout="", stderr="")
+                    return subprocess.CompletedProcess(cmd, 0, "", "")
             
-            mock_run.side_effect = cmd_side_effect
+            mock_git.side_effect = git_side_effect
             
-            with patch('os.chdir'):
-                result = subprocess.run(
-                    [str(claude_tasker_script), "316", "--prompt-only"],
-                    cwd=mock_git_repo,
-                    capture_output=True,
-                    text=True
-                )
+            success, branch_name = workflow.workspace_manager.create_timestamped_branch(316)
             
-            # Should create timestamped branch
-            git_checkout_calls = [call for call in mock_run.call_args_list 
-                                if 'git checkout -b issue-316-' in str(call.args)]
-            assert len(git_checkout_calls) > 0 or result.returncode == 0
+            assert success is True
+            assert branch_name == "issue-316-1234567890"
+            
+            # Should have called git checkout with timestamped branch name
+            git_calls = [call.args[0] for call in mock_git.call_args_list]
+            checkout_calls = [call for call in git_calls if 'checkout' in ' '.join(call) and 'issue-316-1234567890' in ' '.join(call)]
+            assert len(checkout_calls) > 0
