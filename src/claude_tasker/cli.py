@@ -192,6 +192,10 @@ def validate_arguments(args: argparse.Namespace) -> Optional[str]:
     if args.auto_pr_review and not args.issue:
         return "Error: --auto-pr-review can only be used with issue processing"
     
+    # Check for interactive and prompt-only conflict
+    if args.interactive and args.prompt_only:
+        return "Error: --interactive and --prompt-only cannot be used together"
+    
     return None
 
 
