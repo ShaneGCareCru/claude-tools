@@ -733,6 +733,8 @@ class TestGitHubClient:
             assert status == {}
 
 
+# Legacy bash script tests have been replaced by GitHubClient tests above
+# The following class is kept for reference but marked as skip
 @pytest.mark.skip(reason="Legacy bash script tests - replaced by GitHubClient tests above")
 class TestGitHubCLI:
     """Test GitHub CLI integrations."""
