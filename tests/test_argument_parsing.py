@@ -180,82 +180,81 @@ class TestArgumentParsing:
     
     def test_invalid_argument(self, claude_tasker_script, mock_git_repo):
         """Test invalid argument handling."""
-        with patch('os.chdir'):
-            result = subprocess.run(
-                [str(claude_tasker_script), "invalid-arg"],
-                cwd=mock_git_repo,
-                capture_output=True,
-                text=True
-            )
-        
-        assert result.returncode != 0
-        # Match actual bash script error message from line 1422
-        assert "Invalid argument: invalid-arg" in result.stderr
-        assert "expected: number, range, --review-pr, or --bug" in result.stderr
+        from src.claude_tasker.cli import main
+        with patch('sys.argv', ['claude-tasker', 'invalid-arg']):
+            with patch('os.chdir'):
+                # Capture stderr
+                from io import StringIO
+                import sys
+                captured_stderr = StringIO()
+                with patch.object(sys, 'stderr', captured_stderr):
+                    exit_code = main()
+                
+                assert exit_code != 0
+                stderr_content = captured_stderr.getvalue()
+                assert "Invalid issue number format" in stderr_content
     
     def test_conflicting_flags_review_pr_and_issue(self, claude_tasker_script, mock_git_repo):
         """Test conflicting flags: --review-pr with issue number."""
-        with patch('os.chdir'):
-            result = subprocess.run(
-                [str(claude_tasker_script), "316", "--review-pr", "329"],
-                cwd=mock_git_repo,
-                capture_output=True,
-                text=True
-            )
-        
-        assert result.returncode != 0
-        # Match exact bash script error message from line 1322
-        assert "Cannot specify both --review-pr and issue number/range" in result.stderr
+        from src.claude_tasker.cli import main
+        with patch('sys.argv', ['claude-tasker', '316', '--review-pr', '329']):
+            with patch('os.chdir'):
+                from io import StringIO
+                import sys
+                captured_stderr = StringIO()
+                with patch.object(sys, 'stderr', captured_stderr):
+                    exit_code = main()
+                
+                assert exit_code != 0
+                stderr_content = captured_stderr.getvalue()
+                assert "multiple actions" in stderr_content
     
     def test_conflicting_flags_bug_and_issue(self, claude_tasker_script, mock_git_repo):
         """Test conflicting flags: --bug with issue number."""
-        with patch('os.chdir'):
-            result = subprocess.run(
-                [str(claude_tasker_script), "316", "--bug", "test bug"],
-                cwd=mock_git_repo,
-                capture_output=True,
-                text=True
-            )
-        
-        assert result.returncode != 0
-        # Match exact bash script error message from line 1415  
-        assert "Cannot specify both issue number/range and other modes" in result.stderr
+        from src.claude_tasker.cli import main
+        with patch('sys.argv', ['claude-tasker', '316', '--bug', 'test bug']):
+            with patch('os.chdir'):
+                from io import StringIO
+                import sys
+                captured_stderr = StringIO()
+                with patch.object(sys, 'stderr', captured_stderr):
+                    exit_code = main()
+                
+                assert exit_code != 0
+                stderr_content = captured_stderr.getvalue()
+                assert "multiple actions" in stderr_content
     
     def test_invalid_coder_option(self, claude_tasker_script, mock_git_repo):
         """Test invalid coder option."""
-        with patch('os.chdir'):
-            result = subprocess.run(
-                [str(claude_tasker_script), "316", "--coder", "invalid", "--prompt-only"],
-                cwd=mock_git_repo,
-                capture_output=True,
-                text=True
-            )
-        
-        assert result.returncode != 0
-        assert "--coder requires either 'claude' or 'codex'" in result.stderr
+        from src.claude_tasker.cli import main
+        with patch('sys.argv', ['claude-tasker', '316', '--coder', 'invalid', '--prompt-only']):
+            with patch('os.chdir'), patch('pathlib.Path.exists', return_value=True):
+                from io import StringIO
+                import sys
+                # This should trigger argparse error for invalid choice
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+                # argparse exits with code 2 for invalid arguments
+                assert exc_info.value.code == 2
     
     def test_invalid_timeout_value(self, claude_tasker_script, mock_git_repo):
         """Test invalid timeout value."""
-        with patch('os.chdir'):
-            result = subprocess.run(
-                [str(claude_tasker_script), "316", "--timeout", "invalid", "--prompt-only"],
-                cwd=mock_git_repo,
-                capture_output=True,
-                text=True
-            )
-        
-        assert result.returncode != 0
-        assert "--timeout requires a number of seconds" in result.stderr
+        from src.claude_tasker.cli import main
+        with patch('sys.argv', ['claude-tasker', '316', '--timeout', 'invalid', '--prompt-only']):
+            with patch('os.chdir'), patch('pathlib.Path.exists', return_value=True):
+                # This should trigger argparse error for invalid type
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+                # argparse exits with code 2 for invalid arguments
+                assert exc_info.value.code == 2
     
     def test_invalid_project_value(self, claude_tasker_script, mock_git_repo):
         """Test invalid project ID value."""
-        with patch('os.chdir'):
-            result = subprocess.run(
-                [str(claude_tasker_script), "316", "--project", "invalid", "--prompt-only"],
-                cwd=mock_git_repo,
-                capture_output=True,
-                text=True
-            )
-        
-        assert result.returncode != 0
-        assert "--project requires a project ID" in result.stderr
+        from src.claude_tasker.cli import main
+        with patch('sys.argv', ['claude-tasker', '316', '--project', 'invalid', '--prompt-only']):
+            with patch('os.chdir'), patch('pathlib.Path.exists', return_value=True):
+                # This should trigger argparse error for invalid type
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+                # argparse exits with code 2 for invalid arguments
+                assert exc_info.value.code == 2
