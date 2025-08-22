@@ -103,74 +103,72 @@ Format your review as constructive feedback with specific suggestions for improv
     def generate_bug_analysis_prompt(self, bug_description: str, claude_md_content: str,
                                    context: Dict[str, Any]) -> str:
         """Generate prompt for bug analysis and issue creation."""
-        prompt_parts = [
-            "You are analyzing a bug report to create a comprehensive GitHub issue.",
-            f"\n## Bug Description\n{bug_description}",
-            f"\n## Project Guidelines (CLAUDE.md)\n{claude_md_content}",
-        ]
-        
-        if context.get('recent_commits'):
-            prompt_parts.append(f"\n## Recent Commits\n{context['recent_commits']}")
-        
-        if context.get('error_logs'):
-            prompt_parts.append(f"\n## Error Logs\n{context['error_logs']}")
-        
-        prompt_parts.append("""
-## Analysis Instructions
-1. **Root Cause Analysis**: Identify potential root causes
-2. **Reproduction Steps**: Define clear steps to reproduce the issue
-3. **Impact Assessment**: Evaluate severity and scope of the bug
-4. **Solution Approach**: Suggest potential solution strategies
-5. **Issue Creation**: Format as a comprehensive GitHub issue
+        # Use a simpler, more focused prompt to avoid Claude CLI timeouts
+        prompt = f"""Analyze this bug and create a GitHub issue:
 
-Provide your analysis and create a well-structured GitHub issue with:
-- Clear title
-- Detailed description
-- Reproduction steps
-- Expected vs actual behavior
-- Suggested labels
-- Priority assessment
-""")
+Bug Description: {bug_description}
+
+Create a well-structured GitHub issue with:
+
+**Title**: Bug: [concise description]
+
+**Description**:
+- **Summary**: What's wrong?
+- **Steps to Reproduce**: How to trigger the bug
+- **Expected Behavior**: What should happen
+- **Actual Behavior**: What actually happens  
+- **Potential Cause**: Likely root cause
+- **Suggested Fix**: How to resolve it
+
+Keep the response focused and practical. Format as markdown."""
         
-        return "\n".join(prompt_parts)
+        return prompt
     
     def _execute_llm_tool(self, tool_name: str, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
         """Generic LLM tool execution with common logic."""
-        prompt_file = None
         try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(prompt)
-                prompt_file = f.name
-            
             # Build command based on tool
             if tool_name == 'llm':
-                cmd = [
-                    'llm', 'prompt', prompt_file,
-                    '--max-tokens', str(max_tokens),
-                    '--output-format', 'json'
-                ]
+                cmd = ['llm', 'prompt', '-']
+                
+                result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False)
+                
+                if result.returncode == 0:
+                    # LLM tool returns plain text, wrap it in a dict
+                    return {
+                        'response': result.stdout.strip(),
+                        'success': True
+                    }
+                else:
+                    return None
+                    
             elif tool_name == 'claude':
-                cmd = [
-                    'claude', '--file', prompt_file,
-                    '--max-tokens', str(max_tokens),
-                    '--output-format', 'json'
-                ]
+                cmd = ['claude', '--print', '--output-format', 'json']
+                
+                result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False)
+                
+                if result.returncode == 0:
+                    try:
+                        # Claude CLI returns JSON when --output-format json is used
+                        claude_response = json.loads(result.stdout)
+                        # Extract the result from Claude's JSON structure
+                        return {
+                            'response': claude_response.get('result', ''),
+                            'success': True
+                        }
+                    except json.JSONDecodeError:
+                        # Fallback to plain text if JSON parsing fails
+                        return {
+                            'response': result.stdout.strip(),
+                            'success': True
+                        }
+                else:
+                    return None
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            
-            if result.returncode == 0:
-                return json.loads(result.stdout)
-            else:
-                return None
                 
-        except (FileNotFoundError, json.JSONDecodeError, Exception):
+        except (FileNotFoundError, Exception):
             return None
-        finally:
-            # Ensure cleanup even on exception
-            if prompt_file and Path(prompt_file).exists():
-                Path(prompt_file).unlink()
     
     def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
         """Build prompt using LLM CLI tool."""

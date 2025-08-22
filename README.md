@@ -4,7 +4,7 @@ A powerful collection of tools for enhancing Claude Code workflows, featuring au
 
 ## Overview
 
-Claude Tools provides a sophisticated task automation system that bridges Claude Code with GitHub workflows. The flagship tool, `claude-tasker`, enables automated issue implementation, code reviews, and bug analysis while maintaining high code quality through structured methodologies.
+Claude Tools provides a sophisticated task automation system that bridges Claude Code with GitHub workflows. Available in both **Bash** and **Python** implementations, the flagship tool `claude-tasker` enables automated issue implementation, code reviews, and bug analysis while maintaining high code quality through structured methodologies.
 
 ### Key Features
 
@@ -22,12 +22,21 @@ Claude Tools provides a sophisticated task automation system that bridges Claude
 
 ### Prerequisites
 
-- **macOS** or **Linux** (bash 4.0+)
+**Core Requirements:**
+- **macOS** or **Linux** 
 - **GitHub CLI (`gh`)** - Authenticated with your GitHub account
 - **jq** - JSON processor
-- **Claude CLI** - For execution mode 
 - **git** - Version control
-- **llm** - configured with OpenAI model
+
+**For Bash Implementation:**
+- **bash 4.0+**
+
+**For Python Implementation:**  
+- **Python 3.7+**
+
+**LLM Tools (choose one):**
+- **Claude CLI** - Primary recommendation for best performance
+- **llm** - Alternative tool, configured with OpenAI model
 
 ### Quick Start
 
@@ -36,33 +45,59 @@ Claude Tools provides a sophisticated task automation system that bridges Claude
 git clone https://github.com/ShaneGCareCru/claude-tools.git
 cd claude-tools
 
-# Make the script executable
-chmod +x claude-tasker
+# Make scripts executable  
+chmod +x claude-tasker claude-tasker-py
 
 # Optional: Add to PATH for global access
 echo 'export PATH="$PATH:'$(pwd)'"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
+### Implementation Choices
+
+Claude Tools offers two implementations to suit different environments:
+
+**Bash Implementation (`claude-tasker`)**
+- Traditional shell script approach
+- Minimal dependencies
+- Direct system integration
+- Recommended for CI/CD environments
+
+**Python Implementation (`claude-tasker-py`)**  
+- Modern object-oriented architecture
+- Enhanced error handling and validation
+- Comprehensive testing framework
+- Better maintainability and extensibility
+- Recommended for development workflows
+
+Both implementations provide identical functionality and can be used interchangeably.
+
 ## Usage
 
 ### Basic Commands
 
+Both implementations support identical command-line syntax:
+
 ```bash
 # Process a single GitHub issue
 ./claude-tasker 123
+./claude-tasker-py 123
 
-# Process a range of issues
+# Process a range of issues  
 ./claude-tasker 100-110
+./claude-tasker-py 100-110
 
 # Review a pull request
 ./claude-tasker --review-pr 456
+./claude-tasker-py --review-pr 456
 
 # Analyze a bug and create an issue
 ./claude-tasker --bug "Users report login fails after password reset"
+./claude-tasker-py --bug "Users report login fails after password reset"
 
 # Interactive mode (default is headless)
 ./claude-tasker 123 --interactive
+./claude-tasker-py 123 --interactive
 ```
 
 ### Advanced Options
@@ -70,29 +105,52 @@ source ~/.bashrc
 ```bash
 # Generate prompts without execution
 ./claude-tasker 123 --prompt-only
+./claude-tasker-py 123 --prompt-only
 
 # Custom timeout between tasks (default: 10 seconds)
 ./claude-tasker 100-105 --timeout 30
+./claude-tasker-py 100-105 --timeout 30
 
 # Dry run - skip actual execution
 ./claude-tasker 123 --dry-run
+./claude-tasker-py 123 --dry-run
 
-# Verbose logging
+# Verbose logging (bash only)
 ./claude-tasker 123 --verbose
+
+# Choose LLM tool (Python only)
+./claude-tasker-py 123 --coder claude
+./claude-tasker-py 123 --coder llm
 ```
 
 ## How It Works
 
 ### Architecture
 
-Claude Tools uses a sophisticated multi-stage approach:
+Claude Tools uses a sophisticated multi-stage approach across both implementations:
 
+**Common Workflow:**
 1. **Context Analysis** - Reads project context from `CLAUDE.md`
-2. **Agent Selection** - Chooses appropriate specialized agent
-3. **Meta-Prompt Generation** - Creates optimized prompts using 4-D methodology
-4. **Execution** - Runs Claude with generated prompts
-5. **Verification** - Validates results and handles edge cases
-6. **GitHub Integration** - Updates issues, creates PRs, posts comments
+2. **Environment Validation** - Checks dependencies and repository state
+3. **Task Processing** - Implements issues, reviews PRs, or analyzes bugs
+4. **LLM Integration** - Uses Claude CLI or LLM tool for AI assistance  
+5. **GitHub Integration** - Updates issues, creates PRs, posts comments
+
+**Implementation Differences:**
+
+**Bash (`claude-tasker`)**
+- Single shell script with embedded functions
+- Direct bash-to-CLI tool integration
+- Agent-based prompt generation
+
+**Python (`claude-tasker-py`)**
+- Modular object-oriented architecture:
+  - `cli.py` - Command-line interface and argument parsing
+  - `workflow_logic.py` - Core orchestration and task management
+  - `prompt_builder.py` - LLM prompt generation and execution
+  - `github_client.py` - GitHub API integration
+  - `environment_validator.py` - Dependency and environment checking
+  - `workspace_manager.py` - Git and file system operations
 
 ### Agent System
 
@@ -115,6 +173,7 @@ Projects should include a `CLAUDE.md` file in the root directory containing:
 
 ### Implementing an Issue
 
+**Bash Implementation:**
 ```bash
 $ ./claude-tasker 234
 [INFO] Processing issue #234: Add user authentication
@@ -122,6 +181,15 @@ $ ./claude-tasker 234
 [INFO] Generating implementation prompt...
 [SUCCESS] Implementation complete with 5 files changed
 [INFO] Creating PR: "Fix #234: Add user authentication"
+```
+
+**Python Implementation:**
+```bash
+$ ./claude-tasker-py 234
+🔄 Processing issue #234...
+✅ Issue #234: Add user authentication implementation successful
+   PR: https://github.com/owner/repo/pull/456
+   Branch: issue-234-1755823988
 ```
 
 ### Reviewing Multiple PRs
@@ -137,11 +205,19 @@ $ ./claude-tasker --review-pr 100-105
 
 ### Bug Analysis
 
+**Bash Implementation:**
 ```bash
 $ ./claude-tasker --bug "API returns 500 error when filtering by date"
 [INFO] Analyzing bug description...
 [INFO] Searching codebase for related patterns...
 [SUCCESS] Created issue #789 with detailed analysis and reproduction steps
+```
+
+**Python Implementation:**
+```bash
+$ ./claude-tasker-py --bug "API returns 500 error when filtering by date"
+🐛 Analyzing bug: API returns 500 error when filtering by date
+✅ Bug analysis completed and issue created: https://github.com/owner/repo/issues/789
 ```
 
 ## Contributing
