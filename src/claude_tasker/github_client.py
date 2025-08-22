@@ -34,6 +34,26 @@ class PRData:
     url: str
 
 
+class GitHubError:
+    """GitHub CLI error codes and patterns."""
+    RATE_LIMIT = 'API rate limit exceeded'
+    AUTH_FAILED = 'authentication failed'
+    NOT_FOUND = 'not found'
+    
+    @classmethod
+    def is_rate_limit(cls, stderr: str) -> bool:
+        """Check if error is rate limit related."""
+        if not stderr:
+            return False
+        rate_limit_patterns = [
+            'API rate limit exceeded',
+            'rate limit',
+            'X-RateLimit-Remaining: 0'
+        ]
+        stderr_lower = stderr.lower()
+        return any(pattern.lower() in stderr_lower for pattern in rate_limit_patterns)
+
+
 class GitHubClient:
     """GitHub CLI integration for issue and PR management."""
     
@@ -53,8 +73,8 @@ class GitHubClient:
                     **kwargs
                 )
                 
-                # Handle rate limiting
-                if result.returncode == 1 and 'API rate limit' in result.stderr:
+                # Handle rate limiting with better detection
+                if result.returncode != 0 and GitHubError.is_rate_limit(result.stderr):
                     if attempt < self.retry_attempts - 1:
                         delay = self.base_delay * (2 ** attempt)  # Exponential backoff
                         time.sleep(delay)

@@ -134,20 +134,31 @@ Provide your analysis and create a well-structured GitHub issue with:
         
         return "\n".join(prompt_parts)
     
-    def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
-        """Build prompt using LLM CLI tool."""
+    def _execute_llm_tool(self, tool_name: str, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
+        """Generic LLM tool execution with common logic."""
+        prompt_file = None
         try:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
                 f.write(prompt)
                 prompt_file = f.name
             
-            result = subprocess.run([
-                'llm', 'prompt', prompt_file,
-                '--max-tokens', str(max_tokens),
-                '--output-format', 'json'
-            ], capture_output=True, text=True, check=False)
+            # Build command based on tool
+            if tool_name == 'llm':
+                cmd = [
+                    'llm', 'prompt', prompt_file,
+                    '--max-tokens', str(max_tokens),
+                    '--output-format', 'json'
+                ]
+            elif tool_name == 'claude':
+                cmd = [
+                    'claude', '--file', prompt_file,
+                    '--max-tokens', str(max_tokens),
+                    '--output-format', 'json'
+                ]
+            else:
+                raise ValueError(f"Unknown tool: {tool_name}")
             
-            Path(prompt_file).unlink()  # Clean up temp file
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
             
             if result.returncode == 0:
                 return json.loads(result.stdout)
@@ -156,29 +167,18 @@ Provide your analysis and create a well-structured GitHub issue with:
                 
         except (FileNotFoundError, json.JSONDecodeError, Exception):
             return None
+        finally:
+            # Ensure cleanup even on exception
+            if prompt_file and Path(prompt_file).exists():
+                Path(prompt_file).unlink()
+    
+    def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
+        """Build prompt using LLM CLI tool."""
+        return self._execute_llm_tool('llm', prompt, max_tokens)
     
     def build_with_claude(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
         """Build prompt using Claude CLI tool."""
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(prompt)
-                prompt_file = f.name
-            
-            result = subprocess.run([
-                'claude', '--file', prompt_file,
-                '--max-tokens', str(max_tokens),
-                '--output-format', 'json'
-            ], capture_output=True, text=True, check=False)
-            
-            Path(prompt_file).unlink()  # Clean up temp file
-            
-            if result.returncode == 0:
-                return json.loads(result.stdout)
-            else:
-                return None
-                
-        except (FileNotFoundError, json.JSONDecodeError, Exception):
-            return None
+        return self._execute_llm_tool('claude', prompt, max_tokens)
     
     def validate_meta_prompt(self, meta_prompt: str) -> bool:
         """Validate meta-prompt to prevent infinite loops."""

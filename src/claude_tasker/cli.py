@@ -3,6 +3,8 @@
 import argparse
 import sys
 import os
+import re
+import time
 from typing import List, Optional
 from pathlib import Path
 
@@ -29,6 +31,24 @@ def parse_issue_range(issue_arg: str) -> tuple[Optional[int], Optional[int]]:
 def parse_pr_range(pr_arg: str) -> tuple[Optional[int], Optional[int]]:
     """Parse PR number or range (e.g., '123' or '123-125')."""
     return parse_issue_range(pr_arg)  # Same logic as issues
+
+
+def extract_pr_number(pr_url: str) -> Optional[int]:
+    """Safely extract PR number from GitHub URL."""
+    try:
+        # Handle both full URLs and PR numbers
+        # Example: https://github.com/owner/repo/pull/123
+        match = re.search(r'/pull/(\d+)', pr_url)
+        if match:
+            return int(match.group(1))
+        
+        # Fallback: check if it's already just a number
+        if pr_url.isdigit():
+            return int(pr_url)
+            
+        return None
+    except (ValueError, AttributeError):
+        return None
 
 
 def create_argument_parser() -> argparse.ArgumentParser:
@@ -248,14 +268,13 @@ def main() -> int:
             if args.auto_pr_review and not args.prompt_only:
                 for result in results:
                     if result.success and result.pr_url:
-                        # Extract PR number from URL
-                        pr_number = result.pr_url.split('/')[-1]
-                        try:
-                            pr_num = int(pr_number)
+                        # Extract PR number from URL using safe extraction
+                        pr_num = extract_pr_number(result.pr_url)
+                        if pr_num:
                             print(f"🔄 Auto-reviewing PR #{pr_num}...")
                             review_result = workflow.review_pr(pr_num, False)
                             print(f"📝 PR #{pr_num}: {review_result.message}")
-                        except ValueError:
+                        else:
                             print(f"⚠️  Could not parse PR number from {result.pr_url}")
         
         elif args.review_pr:
@@ -280,7 +299,6 @@ def main() -> int:
                     # Apply timeout between PRs (except for last one)
                     if pr_number < end and args.timeout > 0:
                         print(f"⏳ Waiting {args.timeout} seconds...")
-                        import time
                         time.sleep(args.timeout)
         
         elif args.bug:
