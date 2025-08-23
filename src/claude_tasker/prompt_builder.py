@@ -360,49 +360,42 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
     def _execute_review_with_claude(self, prompt: str) -> Optional[Dict[str, Any]]:
         """Execute Claude specifically for PR reviews.
         
-        This method runs Claude in headless mode and captures the full output
+        This method runs Claude in print mode and captures the full output
         for PR review comments.
         """
         print("[DEBUG] Executing Claude for PR review")
         try:
-            # Write prompt to temporary file to avoid shell escaping issues
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(prompt)
-                prompt_file = f.name
+            # Run Claude with the prompt to generate the review
+            # Use --print to get the output and pass prompt via stdin
+            cmd = ['claude', '--print']
             
-            try:
-                # Run Claude in headless mode to generate the review
-                cmd = ['claude', '-p', prompt_file, '--permission-mode', 'bypassPermissions']
+            print(f"[DEBUG] Running command: {' '.join(cmd)}")
+            print(f"[DEBUG] Prompt length: {len(prompt)} chars")
+            
+            # Execute with longer timeout for review generation
+            result = subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300  # 5 minute timeout for reviews
+            )
+            
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                print(f"[DEBUG] Claude review completed successfully")
+                print(f"[DEBUG] Output length: {len(output)} chars")
                 
-                print(f"[DEBUG] Running command: {' '.join(cmd)}")
-                print(f"[DEBUG] Prompt length: {len(prompt)} chars")
-                
-                # Execute with longer timeout for review generation
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=300  # 5 minute timeout for reviews
-                )
-                
-                if result.returncode == 0:
-                    output = result.stdout.strip()
-                    print(f"[DEBUG] Claude review completed successfully")
-                    print(f"[DEBUG] Output length: {len(output)} chars")
-                    
-                    # For reviews, we want the full output as the response
-                    return {
-                        'response': output,
-                        'success': True
-                    }
-                else:
-                    print(f"[DEBUG] Claude review failed with return code {result.returncode}")
-                    print(f"[DEBUG] stderr: {result.stderr[:500]}")
-                    return None
-            finally:
-                # Clean up temp file
-                Path(prompt_file).unlink(missing_ok=True)
+                # For reviews, we want the full output as the response
+                return {
+                    'response': output,
+                    'success': True
+                }
+            else:
+                print(f"[DEBUG] Claude review failed with return code {result.returncode}")
+                print(f"[DEBUG] stderr: {result.stderr[:500]}")
+                return None
                 
         except subprocess.TimeoutExpired:
             print("[DEBUG] Claude review command timed out")
