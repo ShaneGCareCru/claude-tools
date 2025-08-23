@@ -22,7 +22,9 @@ class TestWorkspaceManager:
             
             # Mock successful git commands
             def git_side_effect(cmd):
-                if cmd == ['reset', '--hard', 'HEAD']:
+                if cmd == ['status', '--porcelain']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "M file.txt", "")  # Has changes
+                elif cmd == ['reset', '--hard', 'HEAD']:
                     return subprocess.CompletedProcess(['git'] + cmd, 0, "HEAD is now at abc123", "")
                 elif cmd == ['clean', '-fd']:
                     return subprocess.CompletedProcess(['git'] + cmd, 0, "Removing untracked files", "")
@@ -39,6 +41,7 @@ class TestWorkspaceManager:
             
             # Verify git commands were called
             expected_calls = [
+                call(['status', '--porcelain']),  # Check if clean first
                 call(['reset', '--hard', 'HEAD']),
                 call(['clean', '-fd'])
             ]
@@ -49,12 +52,15 @@ class TestWorkspaceManager:
         workspace = WorkspaceManager()
         
         with patch.object(workspace, '_run_git_command') as mock_git, \
-             patch('builtins.input', return_value='y'), \
+             patch('builtins.input', return_value='1'), \
+             patch('builtins.print'), \
              patch.object(workspace, '_is_interactive', return_value=True):
             
             # Mock successful git commands
             def git_side_effect(cmd):
-                if cmd == ['reset', '--hard', 'HEAD']:
+                if cmd == ['status', '--porcelain']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "M file.txt", "")  # Has changes
+                elif cmd == ['reset', '--hard', 'HEAD']:
                     return subprocess.CompletedProcess(['git'] + cmd, 0, "HEAD is now at abc123", "")
                 elif cmd == ['clean', '-fd']:
                     return subprocess.CompletedProcess(['git'] + cmd, 0, "Removing untracked files", "")
@@ -63,7 +69,7 @@ class TestWorkspaceManager:
             
             mock_git.side_effect = git_side_effect
             
-            # Test interactive workspace hygiene
+            # Test interactive workspace hygiene with option 1 (clean)
             result = workspace.workspace_hygiene(force=False)
             
             # Should succeed after user confirmation
@@ -71,6 +77,7 @@ class TestWorkspaceManager:
             
             # Verify git commands were called after confirmation
             expected_calls = [
+                call(['status', '--porcelain']),  # Check status first
                 call(['reset', '--hard', 'HEAD']),
                 call(['clean', '-fd'])
             ]
@@ -225,6 +232,112 @@ class TestWorkspaceManager:
             assert len(commit_calls) > 0
             assert len(push_calls) > 0
     
+    def test_workspace_hygiene_skip_when_clean(self):
+        """Test that workspace hygiene skips cleanup when already clean."""
+        workspace = WorkspaceManager()
+        
+        with patch.object(workspace, '_run_git_command') as mock_git:
+            
+            # Mock clean workspace
+            def git_side_effect(cmd):
+                if cmd == ['status', '--porcelain']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "", "")  # No changes
+                else:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "", "")
+            
+            mock_git.side_effect = git_side_effect
+            
+            # Test workspace hygiene on clean workspace
+            result = workspace.workspace_hygiene(force=False)
+            
+            # Should succeed without doing anything
+            assert result is True
+            
+            # Verify only status check was called, no reset or clean
+            mock_git.assert_called_once_with(['status', '--porcelain'])
+    
+    def test_workspace_hygiene_stash_option(self):
+        """Test stashing changes during workspace hygiene."""
+        workspace = WorkspaceManager()
+        workspace.interactive_mode = True  # Set interactive mode directly
+        
+        with patch.object(workspace, '_run_git_command') as mock_git, \
+             patch('builtins.input', return_value='2'), \
+             patch('builtins.print'):
+            
+            # Mock git commands
+            def git_side_effect(cmd):
+                if cmd == ['status', '--porcelain']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "M file.txt", "")  # Has changes
+                elif len(cmd) >= 2 and cmd[:2] == ['stash', 'push']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "Saved working directory", "")
+                else:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "", "")
+            
+            mock_git.side_effect = git_side_effect
+            
+            # Test workspace hygiene with stash option
+            result = workspace.workspace_hygiene(force=False)
+            
+            # Should succeed after stashing
+            assert result is True
+            
+            # Verify stash was called
+            stash_calls = [c for c in mock_git.call_args_list 
+                          if len(c[0]) > 0 and len(c[0][0]) >= 2 and c[0][0][:2] == ['stash', 'push']]
+            assert len(stash_calls) == 1
+    
+    def test_has_changes_with_status_porcelain(self):
+        """Test has_changes_to_commit using git status --porcelain."""
+        workspace = WorkspaceManager()
+        
+        with patch.object(workspace, '_run_git_command') as mock_git:
+            
+            # Test with changes
+            mock_git.return_value = subprocess.CompletedProcess(
+                ['git', 'status', '--porcelain'], 0, "M file.txt\n?? new.txt", ""
+            )
+            assert workspace.has_changes_to_commit() is True
+            
+            # Test without changes
+            mock_git.return_value = subprocess.CompletedProcess(
+                ['git', 'status', '--porcelain'], 0, "", ""
+            )
+            assert workspace.has_changes_to_commit() is False
+    
+    def test_create_branch_when_main_missing(self):
+        """Test branch creation when main branch doesn't exist locally."""
+        workspace = WorkspaceManager()
+        
+        with patch('time.time', return_value=1234567890), \
+             patch.object(workspace, '_run_git_command') as mock_git:
+            
+            # Mock git commands
+            def git_side_effect(cmd):
+                if cmd == ['branch', '--show-current']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "feature", "")
+                elif cmd == ['show-ref', '--verify', '--quiet', 'refs/heads/main']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 1, "", "")  # main doesn't exist
+                elif cmd == ['show-ref', '--verify', '--quiet', 'refs/heads/master']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 1, "", "")  # master doesn't exist  
+                elif cmd == ['fetch', 'origin']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "", "")
+                elif cmd == ['checkout', '-b', 'main', 'origin/main']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "Branch created", "")
+                elif cmd == ['checkout', '-b', 'issue-42-1234567890']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "New branch", "")
+                else:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "", "")
+            
+            mock_git.side_effect = git_side_effect
+            
+            # Test branch creation
+            success, branch_name = workspace.create_timestamped_branch(42)
+            
+            # Should succeed
+            assert success is True
+            assert branch_name == "issue-42-1234567890"
+    
     def test_workspace_status_detection(self):
         """Test detection of workspace changes requiring cleanup."""
         workspace = WorkspaceManager()
@@ -267,7 +380,9 @@ class TestWorkspaceManager:
             
             # Mock git commands
             def git_side_effect(cmd):
-                if cmd == ['reset', '--hard', 'HEAD']:
+                if cmd == ['status', '--porcelain']:
+                    return subprocess.CompletedProcess(['git'] + cmd, 0, "M file.txt", "")  # Has changes
+                elif cmd == ['reset', '--hard', 'HEAD']:
                     return subprocess.CompletedProcess(['git'] + cmd, 0, "HEAD is now at abc123", "")
                 elif cmd == ['clean', '-fd']:
                     return subprocess.CompletedProcess(['git'] + cmd, 0, "Removing untracked files", "")
@@ -285,6 +400,7 @@ class TestWorkspaceManager:
             
             # Verify git commands were called without user interaction
             expected_calls = [
+                call(['status', '--porcelain']),  # Check status first
                 call(['reset', '--hard', 'HEAD']),
                 call(['clean', '-fd'])
             ]
