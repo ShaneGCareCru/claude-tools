@@ -332,24 +332,50 @@ The issue has been reviewed and no further action is needed at this time.
                 pr_data, pr_diff, self.claude_md_content
             )
             
-            # Execute review (using claude directly for reviews)
-            review_result = self.prompt_builder.build_with_claude(review_prompt)
+            # Execute review (using claude directly for reviews with review_mode=True)
+            print(f"[DEBUG] Generating review for PR #{pr_number}...")
+            review_result = self.prompt_builder.build_with_claude(review_prompt, review_mode=True)
             
             if not review_result:
+                print(f"[ERROR] No review result returned for PR #{pr_number}")
                 return WorkflowResult(
                     success=False,
-                    message=f"Failed to generate review for PR #{pr_number}"
+                    message=f"Failed to generate review for PR #{pr_number} - no result returned"
+                )
+            
+            if not review_result.get('response'):
+                print(f"[ERROR] Review result missing 'response' field for PR #{pr_number}")
+                print(f"[DEBUG] Review result keys: {review_result.keys()}")
+                return WorkflowResult(
+                    success=False,
+                    message=f"Failed to generate review for PR #{pr_number} - no response content"
                 )
             
             # If not prompt-only, post review comment
             if not prompt_only:
-                review_comment = f"""## 🤖 Automated Code Review
+                # Get the actual review content
+                review_content = review_result.get('response', 'Review completed')
+                print(f"[DEBUG] Review content length: {len(review_content)} chars")
+                print(f"[DEBUG] Review content preview: {review_content[:200]}...")
+                
+                # Only add wrapper if there's actual content
+                if review_content and review_content != 'Review completed':
+                    review_comment = f"""## 🤖 Automated Code Review
 
-{review_result.get('response', 'Review completed')}
+{review_content}
+
+---
+🤖 Generated via automated review with [Claude Code](https://claude.ai/code)"""
+                else:
+                    # Fallback if no content
+                    review_comment = f"""## 🤖 Automated Code Review
+
+Unable to generate detailed review. Please review the PR manually.
 
 ---
 🤖 Generated via automated review with [Claude Code](https://claude.ai/code)"""
                 
+                print(f"[DEBUG] Posting review comment to PR #{pr_number}...")
                 if self.github_client.comment_on_pr(pr_number, review_comment):
                     return WorkflowResult(
                         success=True,
