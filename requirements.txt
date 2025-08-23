@@ -1,0 +1,12 @@
+# Core dependencies
+typing-extensions>=4.0.0
+
+# Logging dependencies
+python-json-logger>=2.0.7
+colorlog>=6.7.0
+rich>=13.0.0
+
+# Optional monitoring dependencies (uncomment if needed)
+# prometheus-client>=0.19.0
+# opentelemetry-api>=1.20.0
+# opentelemetry-sdk>=1.20.0
