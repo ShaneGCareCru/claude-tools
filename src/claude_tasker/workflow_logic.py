@@ -11,6 +11,9 @@ from .github_client import GitHubClient
 from .workspace_manager import WorkspaceManager
 from .prompt_builder import PromptBuilder
 from .pr_body_generator import PRBodyGenerator
+from src.claude_tasker.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -173,9 +176,9 @@ class WorkflowLogic:
                 )
             
             # Check if there are changes to commit
-            print("[DEBUG] Checking for git changes after Claude execution")
+            logger.debug("Checking for git changes after Claude execution")
             has_changes = self.workspace_manager.has_changes_to_commit()
-            print(f"[DEBUG] Git has changes: {has_changes}")
+            logger.debug(f"Git has changes: {has_changes}")
             
             if has_changes:
                 # Commit changes
@@ -283,6 +286,7 @@ The issue has been reviewed and no further action is needed at this time.
         results = []
         
         for issue_number in range(start_issue, end_issue + 1):
+            logger.info(f"Processing issue #{issue_number}...")
             print(f"\n🔄 Processing issue #{issue_number}...")
             
             result = self.process_single_issue(
@@ -294,6 +298,7 @@ The issue has been reviewed and no further action is needed at this time.
             
             # Apply timeout between issues (except for last one)
             if issue_number < end_issue and self.timeout_between_tasks > 0:
+                logger.debug(f"Waiting {self.timeout_between_tasks} seconds between tasks")
                 print(f"⏳ Waiting {self.timeout_between_tasks} seconds...")
                 time.sleep(self.timeout_between_tasks)
         
@@ -333,10 +338,11 @@ The issue has been reviewed and no further action is needed at this time.
             )
             
             # Execute review (using claude directly for reviews with review_mode=True)
-            print(f"[DEBUG] Generating review for PR #{pr_number}...")
+            logger.debug(f"Generating review for PR #{pr_number}...")
             review_result = self.prompt_builder.build_with_claude(review_prompt, review_mode=True)
             
             if not review_result:
+                logger.error(f"No review result returned for PR #{pr_number}")
                 print(f"[ERROR] No review result returned for PR #{pr_number}")
                 return WorkflowResult(
                     success=False,
@@ -344,6 +350,8 @@ The issue has been reviewed and no further action is needed at this time.
                 )
             
             if not review_result.get('response'):
+                logger.error(f"Review result missing 'response' field for PR #{pr_number}")
+                logger.debug(f"Review result keys: {review_result.keys()}")
                 print(f"[ERROR] Review result missing 'response' field for PR #{pr_number}")
                 print(f"[DEBUG] Review result keys: {review_result.keys()}")
                 return WorkflowResult(
@@ -355,8 +363,8 @@ The issue has been reviewed and no further action is needed at this time.
             if not prompt_only:
                 # Get the actual review content
                 review_content = review_result.get('response', 'Review completed')
-                print(f"[DEBUG] Review content length: {len(review_content)} chars")
-                print(f"[DEBUG] Review content preview: {review_content[:200]}...")
+                logger.debug(f"Review content length: {len(review_content)} chars")
+                logger.debug(f"Review content preview: {review_content[:200]}...")
                 
                 # Only add wrapper if there's actual content
                 if review_content and review_content != 'Review completed':
@@ -375,7 +383,7 @@ Unable to generate detailed review. Please review the PR manually.
 ---
 🤖 Generated via automated review with [Claude Code](https://claude.ai/code)"""
                 
-                print(f"[DEBUG] Posting review comment to PR #{pr_number}...")
+                logger.debug(f"Posting review comment to PR #{pr_number}...")
                 if self.github_client.comment_on_pr(pr_number, review_comment):
                     return WorkflowResult(
                         success=True,

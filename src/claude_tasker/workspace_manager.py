@@ -5,6 +5,9 @@ import os
 import time
 from typing import Tuple, Optional, List
 from pathlib import Path
+from src.claude_tasker.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class WorkspaceManager:
@@ -130,9 +133,11 @@ class WorkspaceManager:
         # Stash all changes including untracked files
         result = self._run_git_command(['stash', 'push', '-u', '-m', stash_message])
         if result.returncode != 0:
+            logger.error(f"Failed to stash changes: {result.stderr}")
             print(f"Failed to stash changes: {result.stderr}")
             return False
         
+        logger.info(f"Changes stashed successfully: {stash_message}")
         print(f"Changes stashed successfully: {stash_message}")
         print("You can restore them later with: git stash pop")
         return True
@@ -207,52 +212,52 @@ class WorkspaceManager:
     
     def has_changes_to_commit(self) -> bool:
         """Check if there are staged or unstaged changes."""
-        print("[DEBUG] Checking for git changes...")
+        logger.debug("Checking for git changes...")
         
         # Use git status --porcelain for a more reliable check
         result = self._run_git_command(['status', '--porcelain'])
-        print(f"[DEBUG] Git status --porcelain check: return code {result.returncode}")
+        logger.debug(f"Git status --porcelain check: return code {result.returncode}")
         
         if result.returncode != 0:
-            print(f"[DEBUG] Git status command failed: {result.stderr}")
+            logger.debug(f"Git status command failed: {result.stderr}")
             # Fall back to checking individual types of changes
             
             # Check for unstaged changes
             result = self._run_git_command(['diff', '--quiet', 'HEAD'])
-            print(f"[DEBUG] Unstaged changes check (git diff --quiet HEAD): return code {result.returncode}")
+            logger.debug(f"Unstaged changes check (git diff --quiet HEAD): return code {result.returncode}")
             if result.returncode != 0:
                 # Double-check with actual diff output
                 diff_result = self._run_git_command(['diff', 'HEAD'])
                 if diff_result.stdout.strip():
-                    print("[DEBUG] Found unstaged changes")
+                    logger.debug("Found unstaged changes")
                     return True
             
             # Check for staged changes
             result = self._run_git_command(['diff', '--cached', '--quiet'])
-            print(f"[DEBUG] Staged changes check (git diff --cached --quiet): return code {result.returncode}")
+            logger.debug(f"Staged changes check (git diff --cached --quiet): return code {result.returncode}")
             if result.returncode != 0:
                 # Double-check with actual diff output
                 diff_result = self._run_git_command(['diff', '--cached'])
                 if diff_result.stdout.strip():
-                    print("[DEBUG] Found staged changes")
+                    logger.debug("Found staged changes")
                     return True
             
             # Check for untracked files
             result = self._run_git_command(['ls-files', '--others', '--exclude-standard'])
             untracked = result.stdout.strip() if result.returncode == 0 else ""
-            print(f"[DEBUG] Untracked files check: {len(untracked)} chars of output")
+            logger.debug(f"Untracked files check: {len(untracked)} chars of output")
             if untracked:
-                print(f"[DEBUG] Found untracked files: {untracked[:200]}...")
+                logger.debug(f"Found untracked files: {untracked[:200]}...")
                 return True
         else:
             # git status --porcelain succeeded, check its output
             output = result.stdout.strip()
-            print(f"[DEBUG] Git status output length: {len(output)} chars")
+            logger.debug(f"Git status output length: {len(output)} chars")
             if output:
-                print(f"[DEBUG] Git status shows changes:\n{output[:500]}...")
+                logger.debug(f"Git status shows changes:\n{output[:500]}...")
                 return True
             else:
-                print("[DEBUG] Git status shows no changes")
+                logger.debug("Git status shows no changes")
         
         return False
     

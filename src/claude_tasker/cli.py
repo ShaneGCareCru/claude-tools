@@ -8,6 +8,9 @@ from typing import List, Optional
 from pathlib import Path
 
 from .workflow_logic import WorkflowLogic, WorkflowResult
+from src.claude_tasker.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def parse_issue_range(issue_arg: str) -> tuple[Optional[int], Optional[int]]:
@@ -213,6 +216,9 @@ def print_results_summary(results: List[WorkflowResult]) -> None:
     # Show failed results
     for result in results:
         if not result.success:
+            logger.error(f"Issue processing failed: {result.message}")
+            if result.error_details:
+                logger.error(f"Error details: {result.error_details}")
             print(f"❌ {result.message}")
             if result.error_details:
                 print(f"   Details: {result.error_details}")
@@ -226,11 +232,13 @@ def main() -> int:
     # Validate arguments
     validation_error = validate_arguments(args)
     if validation_error:
+        logger.error(f"Validation error: {validation_error}")
         print(f"Error: {validation_error}", file=sys.stderr)
         return 1
     
     # Check for CLAUDE.md (required for project context)
     if not Path("CLAUDE.md").exists():
+        logger.error("CLAUDE.md not found. Must be run from project root.")
         print("Error: CLAUDE.md not found. Must be run from project root.", file=sys.stderr)
         return 1
     
@@ -319,6 +327,9 @@ def main() -> int:
                 if result.branch_name:
                     print(f"   Branch: {result.branch_name}")
             else:
+                logger.error(f"Bug analysis failed: {result.message}")
+                if result.error_details:
+                    logger.error(f"Error details: {result.error_details}")
                 print(f"❌ {result.message}")
                 if result.error_details:
                     print(f"   Details: {result.error_details}")
@@ -334,10 +345,12 @@ def main() -> int:
             return 1
     
     except KeyboardInterrupt:
+        logger.warning("Operation interrupted by user")
         print("\n⚠️  Operation interrupted by user", file=sys.stderr)
         return 130  # Standard exit code for SIGINT
     
     except Exception as e:
+        logger.error(f"Unexpected error: {e}", exc_info=True)
         print(f"❌ Unexpected error: {e}", file=sys.stderr)
         return 1
 

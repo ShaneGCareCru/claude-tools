@@ -142,7 +142,7 @@ class TestCriticalEdgeCases:
             # Simulate timeout
             mock_run.side_effect = subprocess.TimeoutExpired(
                 cmd=['claude', '-p', '--permission-mode', 'bypassPermissions'],
-                timeout=180
+                timeout=1200  # Updated to 20 minutes
             )
             
             # Should handle timeout gracefully
@@ -155,10 +155,10 @@ class TestCriticalEdgeCases:
             # Should return None (failure) not crash
             assert result is None
             
-            # Verify timeout was set appropriately
+            # Verify timeout was set appropriately (updated to 20 minutes)
             mock_run.assert_called_once()
             call_kwargs = mock_run.call_args[1]
-            assert call_kwargs['timeout'] == 180
+            assert call_kwargs['timeout'] == 1200  # 20 minutes
 
     def test_large_prompt_handling(self):
         """Test behavior with very large prompts.
