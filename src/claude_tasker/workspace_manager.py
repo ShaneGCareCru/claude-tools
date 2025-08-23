@@ -79,6 +79,12 @@ class WorkspaceManager:
     
     def workspace_hygiene(self, force: bool = False) -> bool:
         """Perform workspace hygiene (reset and clean)."""
+        # Check if workspace is already clean
+        if self.is_working_directory_clean():
+            # Workspace is already clean, no need to do anything
+            return True
+        
+        # Only prompt if there are actual changes and we're in interactive mode
         if not force and self.interactive_mode:
             if not self._confirm_cleanup():
                 return False
@@ -98,10 +104,38 @@ class WorkspaceManager:
     def _confirm_cleanup(self) -> bool:
         """Ask user to confirm workspace cleanup in interactive mode."""
         try:
-            response = input("Workspace has changes. Clean workspace (reset --hard && clean -fd)? [y/N]: ")
-            return response.lower().startswith('y')
+            print("Workspace has changes. Choose an option:")
+            print("  1. Clean workspace (reset --hard && clean -fd)")
+            print("  2. Stash changes and continue")
+            print("  3. Cancel operation")
+            response = input("Your choice [1/2/3]: ").strip()
+            
+            if response == '1':
+                # User wants to clean workspace
+                return True
+            elif response == '2':
+                # User wants to stash changes
+                return self._stash_changes()
+            else:
+                # User wants to cancel
+                return False
         except (EOFError, KeyboardInterrupt):
             return False
+    
+    def _stash_changes(self) -> bool:
+        """Stash current changes with a descriptive message."""
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        stash_message = f"claude-tasker auto-stash at {timestamp}"
+        
+        # Stash all changes including untracked files
+        result = self._run_git_command(['stash', 'push', '-u', '-m', stash_message])
+        if result.returncode != 0:
+            print(f"Failed to stash changes: {result.stderr}")
+            return False
+        
+        print(f"Changes stashed successfully: {stash_message}")
+        print("You can restore them later with: git stash pop")
+        return True
     
     def create_timestamped_branch(self, issue_number: int, base_branch: str = None) -> Tuple[bool, str]:
         """Create a new timestamped branch for issue processing."""
