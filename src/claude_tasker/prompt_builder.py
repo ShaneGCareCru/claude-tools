@@ -6,6 +6,9 @@ import tempfile
 from typing import Dict, Optional, Any
 from pathlib import Path
 from .github_client import IssueData, PRData
+from src.claude_tasker.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class PromptBuilder:
@@ -168,27 +171,27 @@ Keep the response focused and practical. Format as markdown."""
             max_tokens: Maximum tokens for response
             execute_mode: If True, actually execute the prompt with Claude (not just print)
         """
-        print(f"[DEBUG] _execute_llm_tool called with tool={tool_name}, execute_mode={execute_mode}")
+        logger.debug(f"_execute_llm_tool called with tool={tool_name}, execute_mode={execute_mode}")
         try:
             # Build command based on tool
             if tool_name == 'llm':
                 # LLM tool uses stdin for prompts
-                print("[DEBUG] Using llm tool")
+                logger.debug("Using llm tool")
                 cmd = [
                     'llm', 'prompt', '-'
                 ]
             elif tool_name == 'claude':
                 if execute_mode:
                     # Actually execute with Claude to make code changes
-                    print("[DEBUG] Executing Claude in implementation mode")
-                    print(f"[DEBUG] Prompt preview (first 200 chars): {prompt[:200]}...")
+                    logger.debug("Executing Claude in implementation mode")
+                    logger.debug(f"Prompt preview (first 200 chars): {prompt[:200]}...")
                     # Use headless mode (-p) with permission bypass for autonomous execution
                     cmd = [
                         'claude', '-p', '--permission-mode', 'bypassPermissions'
                     ]
                 else:
                     # Just generate/print prompt
-                    print("[DEBUG] Running Claude in prompt generation mode")
+                    logger.debug("Running Claude in prompt generation mode")
                     cmd = [
                         'claude', '--print',
                         '--output-format', 'json',
@@ -200,18 +203,18 @@ Keep the response focused and practical. Format as markdown."""
             # Run with timeout to prevent hanging
             # Pass prompt via stdin for both llm and claude execute mode
             if tool_name == 'llm' or (tool_name == 'claude' and execute_mode):
-                print(f"[DEBUG] Running command: {' '.join(cmd)}")
-                print(f"[DEBUG] Passing prompt via stdin ({len(prompt)} chars)")
-                timeout_val = 180 if execute_mode else 120
+                logger.debug(f"Running command: {' '.join(cmd)}")
+                logger.debug(f"Passing prompt via stdin ({len(prompt)} chars)")
+                timeout_val = 1200 if execute_mode else 120  # 20 minutes for execution, 2 minutes for generation
                 result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False, timeout=timeout_val)
             else:
                 result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
             
             if result.returncode == 0:
                 if execute_mode:
-                    print(f"[DEBUG] Claude execution completed successfully")
-                    print(f"[DEBUG] Output length: {len(result.stdout)} chars")
-                    print(f"[DEBUG] Output preview: {result.stdout[:500]}...")
+                    logger.debug(f"Claude execution completed successfully")
+                    logger.debug(f"Output length: {len(result.stdout)} chars")
+                    logger.debug(f"Output preview: {result.stdout[:500]}...")
                 try:
                     return json.loads(result.stdout)
                 except json.JSONDecodeError:
@@ -221,15 +224,15 @@ Keep the response focused and practical. Format as markdown."""
                         'optimized_prompt': result.stdout.strip()
                     }
             else:
-                print(f"[DEBUG] Command failed with return code {result.returncode}")
-                print(f"[DEBUG] stderr: {result.stderr[:500]}")
+                logger.error(f"Command failed with return code {result.returncode}")
+                logger.error(f"stderr: {result.stderr[:500]}")
                 return None
                 
         except subprocess.TimeoutExpired:
-            print("[DEBUG] Command timed out")
+            logger.error("Command timed out")
             return None
         except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
-            print(f"[DEBUG] Error: {e}")
+            logger.error(f"Error: {e}")
             return None
     
     def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
@@ -344,11 +347,17 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
             
             # Stage 3: Execute optimized prompt (if not prompt-only mode)
             if not prompt_only:
-                print("[DEBUG] Stage 3: Executing optimized prompt with Claude")
-                print(f"[DEBUG] Prompt length: {len(optimized_prompt)} characters")
+                logger.debug("Stage 3: Executing optimized prompt with Claude")
+                logger.debug(f"Prompt length: {len(optimized_prompt)} characters")
                 execution_result = self.build_with_claude(optimized_prompt, execute_mode=True)
                 results['execution_result'] = execution_result
-                print(f"[DEBUG] Execution result: {execution_result is not None}")
+                logger.debug(f"Execution result: {execution_result is not None}")
+                
+                # Check if execution actually succeeded
+                if execution_result is None:
+                    results['error'] = "Claude execution failed or timed out - consider increasing timeout or checking Claude availability"
+                    results['success'] = False
+                    return results
             
             results['success'] = True
             return results
@@ -363,7 +372,7 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
         This method runs Claude in headless mode and captures the full output
         for PR review comments.
         """
-        print("[DEBUG] Executing Claude for PR review")
+        logger.debug("Executing Claude for PR review")
         try:
             # Write prompt to temporary file to avoid shell escaping issues
             with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
@@ -374,8 +383,8 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                 # Run Claude in headless mode to generate the review
                 cmd = ['claude', '-p', prompt_file, '--permission-mode', 'bypassPermissions']
                 
-                print(f"[DEBUG] Running command: {' '.join(cmd)}")
-                print(f"[DEBUG] Prompt length: {len(prompt)} chars")
+                logger.debug(f"Running command: {' '.join(cmd)}")
+                logger.debug(f"Prompt length: {len(prompt)} chars")
                 
                 # Execute with longer timeout for review generation
                 result = subprocess.run(
@@ -383,13 +392,13 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                     capture_output=True,
                     text=True,
                     check=False,
-                    timeout=300  # 5 minute timeout for reviews
+                    timeout=1200  # 20 minute timeout for reviews
                 )
                 
                 if result.returncode == 0:
                     output = result.stdout.strip()
-                    print(f"[DEBUG] Claude review completed successfully")
-                    print(f"[DEBUG] Output length: {len(output)} chars")
+                    logger.debug(f"Claude review completed successfully")
+                    logger.debug(f"Output length: {len(output)} chars")
                     
                     # For reviews, we want the full output as the response
                     return {
@@ -397,16 +406,16 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                         'success': True
                     }
                 else:
-                    print(f"[DEBUG] Claude review failed with return code {result.returncode}")
-                    print(f"[DEBUG] stderr: {result.stderr[:500]}")
+                    logger.error(f"Claude review failed with return code {result.returncode}")
+                    logger.error(f"stderr: {result.stderr[:500]}")
                     return None
             finally:
                 # Clean up temp file
                 Path(prompt_file).unlink(missing_ok=True)
                 
         except subprocess.TimeoutExpired:
-            print("[DEBUG] Claude review command timed out")
+            logger.error("Claude review command timed out")
             return None
         except Exception as e:
-            print(f"[DEBUG] Error executing Claude review: {e}")
+            logger.error(f"Error executing Claude review: {e}")
             return None
