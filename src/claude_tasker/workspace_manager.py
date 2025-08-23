@@ -146,12 +146,29 @@ class WorkspaceManager:
         timestamp = str(int(time.time()))
         branch_name = f"issue-{issue_number}-{timestamp}"
         
-        # Switch to base branch
-        result = self._run_git_command(['checkout', base_branch])
+        # First, fetch to ensure we have the latest remote branches
+        result = self._run_git_command(['fetch', 'origin'])
         if result.returncode != 0:
-            return False, f"Failed to checkout {base_branch}: {result.stderr}"
+            # Continue even if fetch fails (might be offline)
+            pass
         
-        # Pull latest changes
+        # Check if base branch exists locally
+        result = self._run_git_command(['show-ref', '--verify', '--quiet', f'refs/heads/{base_branch}'])
+        if result.returncode != 0:
+            # Base branch doesn't exist locally, try to create it from origin
+            result = self._run_git_command(['checkout', '-b', base_branch, f'origin/{base_branch}'])
+            if result.returncode != 0:
+                # If that fails, just create the branch locally
+                result = self._run_git_command(['checkout', '-b', base_branch])
+                if result.returncode != 0:
+                    return False, f"Failed to create base branch {base_branch}: {result.stderr}"
+        else:
+            # Switch to base branch
+            result = self._run_git_command(['checkout', base_branch])
+            if result.returncode != 0:
+                return False, f"Failed to checkout {base_branch}: {result.stderr}"
+        
+        # Pull latest changes if possible
         result = self._run_git_command(['pull', 'origin', base_branch])
         if result.returncode != 0:
             # Continue even if pull fails (might be offline or no upstream)
@@ -192,27 +209,50 @@ class WorkspaceManager:
         """Check if there are staged or unstaged changes."""
         print("[DEBUG] Checking for git changes...")
         
-        # Check for unstaged changes
-        result = self._run_git_command(['diff', '--quiet'])
-        print(f"[DEBUG] Unstaged changes check (git diff --quiet): return code {result.returncode}")
-        if result.returncode != 0:
-            print("[DEBUG] Found unstaged changes")
-            return True
+        # Use git status --porcelain for a more reliable check
+        result = self._run_git_command(['status', '--porcelain'])
+        print(f"[DEBUG] Git status --porcelain check: return code {result.returncode}")
         
-        # Check for staged changes
-        result = self._run_git_command(['diff', '--cached', '--quiet'])
-        print(f"[DEBUG] Staged changes check (git diff --cached --quiet): return code {result.returncode}")
         if result.returncode != 0:
-            print("[DEBUG] Found staged changes")
-            return True
-        
-        # Check for untracked files
-        result = self._run_git_command(['ls-files', '--others', '--exclude-standard'])
-        untracked = result.stdout.strip() if result.returncode == 0 else ""
-        print(f"[DEBUG] Untracked files check: {len(untracked)} chars of output")
-        if untracked:
-            print(f"[DEBUG] Found untracked files: {untracked[:200]}...")
-            return True
+            print(f"[DEBUG] Git status command failed: {result.stderr}")
+            # Fall back to checking individual types of changes
+            
+            # Check for unstaged changes
+            result = self._run_git_command(['diff', '--quiet', 'HEAD'])
+            print(f"[DEBUG] Unstaged changes check (git diff --quiet HEAD): return code {result.returncode}")
+            if result.returncode != 0:
+                # Double-check with actual diff output
+                diff_result = self._run_git_command(['diff', 'HEAD'])
+                if diff_result.stdout.strip():
+                    print("[DEBUG] Found unstaged changes")
+                    return True
+            
+            # Check for staged changes
+            result = self._run_git_command(['diff', '--cached', '--quiet'])
+            print(f"[DEBUG] Staged changes check (git diff --cached --quiet): return code {result.returncode}")
+            if result.returncode != 0:
+                # Double-check with actual diff output
+                diff_result = self._run_git_command(['diff', '--cached'])
+                if diff_result.stdout.strip():
+                    print("[DEBUG] Found staged changes")
+                    return True
+            
+            # Check for untracked files
+            result = self._run_git_command(['ls-files', '--others', '--exclude-standard'])
+            untracked = result.stdout.strip() if result.returncode == 0 else ""
+            print(f"[DEBUG] Untracked files check: {len(untracked)} chars of output")
+            if untracked:
+                print(f"[DEBUG] Found untracked files: {untracked[:200]}...")
+                return True
+        else:
+            # git status --porcelain succeeded, check its output
+            output = result.stdout.strip()
+            print(f"[DEBUG] Git status output length: {len(output)} chars")
+            if output:
+                print(f"[DEBUG] Git status shows changes:\n{output[:500]}...")
+                return True
+            else:
+                print("[DEBUG] Git status shows no changes")
         
         return False
     
