@@ -97,6 +97,41 @@ Provide a thorough code review covering:
 6. **Security**: Security considerations and vulnerabilities
 7. **Maintainability**: Code organization and future maintainability
 
+## Output Format
+Provide your review in this exact format:
+
+### ✅ Overall Assessment
+[Brief summary of the PR's quality and readiness]
+
+### Code Review Details
+
+1. **Code Quality** ⭐⭐⭐⭐⭐
+[Your assessment here]
+
+2. **Functionality** ⭐⭐⭐⭐⭐
+[Your assessment here]
+
+3. **Testing** ⭐⭐⭐⭐⭐
+[Your assessment here]
+
+4. **Documentation** ⭐⭐⭐⭐⭐
+[Your assessment here]
+
+5. **Performance** ⭐⭐⭐⭐⭐
+[Your assessment here]
+
+6. **Security** ⭐⭐⭐⭐⭐
+[Your assessment here]
+
+7. **Maintainability** ⭐⭐⭐⭐⭐
+[Your assessment here]
+
+### 🔧 Suggestions for Improvement
+[List specific, actionable suggestions]
+
+### ✅ Approval Recommendation
+[APPROVE / REQUEST_CHANGES / COMMENT - with clear reasoning]
+
 Format your review as constructive feedback with specific suggestions for improvement.
 """
     
@@ -201,14 +236,18 @@ Keep the response focused and practical. Format as markdown."""
         """Build prompt using LLM CLI tool."""
         return self._execute_llm_tool('llm', prompt, max_tokens)
     
-    def build_with_claude(self, prompt: str, max_tokens: int = 4000, execute_mode: bool = False) -> Optional[Dict[str, Any]]:
+    def build_with_claude(self, prompt: str, max_tokens: int = 4000, execute_mode: bool = False, review_mode: bool = False) -> Optional[Dict[str, Any]]:
         """Build prompt using Claude CLI tool.
         
         Args:
             prompt: The prompt text
             max_tokens: Maximum tokens for response
             execute_mode: If True, actually execute the prompt (make code changes)
+            review_mode: If True, run in review mode to capture full output
         """
+        if review_mode:
+            # For PR reviews, run Claude and capture the full output
+            return self._execute_review_with_claude(prompt)
         return self._execute_llm_tool('claude', prompt, max_tokens, execute_mode)
     
     def validate_meta_prompt(self, meta_prompt: str) -> bool:
@@ -317,3 +356,57 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
         except Exception as e:
             results['error'] = str(e)
             return results
+    
+    def _execute_review_with_claude(self, prompt: str) -> Optional[Dict[str, Any]]:
+        """Execute Claude specifically for PR reviews.
+        
+        This method runs Claude in headless mode and captures the full output
+        for PR review comments.
+        """
+        print("[DEBUG] Executing Claude for PR review")
+        try:
+            # Write prompt to temporary file to avoid shell escaping issues
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(prompt)
+                prompt_file = f.name
+            
+            try:
+                # Run Claude in headless mode to generate the review
+                cmd = ['claude', '-p', prompt_file, '--permission-mode', 'bypassPermissions']
+                
+                print(f"[DEBUG] Running command: {' '.join(cmd)}")
+                print(f"[DEBUG] Prompt length: {len(prompt)} chars")
+                
+                # Execute with longer timeout for review generation
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=300  # 5 minute timeout for reviews
+                )
+                
+                if result.returncode == 0:
+                    output = result.stdout.strip()
+                    print(f"[DEBUG] Claude review completed successfully")
+                    print(f"[DEBUG] Output length: {len(output)} chars")
+                    
+                    # For reviews, we want the full output as the response
+                    return {
+                        'response': output,
+                        'success': True
+                    }
+                else:
+                    print(f"[DEBUG] Claude review failed with return code {result.returncode}")
+                    print(f"[DEBUG] stderr: {result.stderr[:500]}")
+                    return None
+            finally:
+                # Clean up temp file
+                Path(prompt_file).unlink(missing_ok=True)
+                
+        except subprocess.TimeoutExpired:
+            print("[DEBUG] Claude review command timed out")
+            return None
+        except Exception as e:
+            print(f"[DEBUG] Error executing Claude review: {e}")
+            return None
