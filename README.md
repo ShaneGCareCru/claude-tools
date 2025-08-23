@@ -177,17 +177,6 @@ Projects should include a `CLAUDE.md` file in the root directory containing:
 
 ### Implementing an Issue
 
-**Bash Implementation:**
-```bash
-$ ./claude-tasker 234
-[INFO] Processing issue #234: Add user authentication
-[INFO] Creating branch: issue-234-20240115-143022
-[INFO] Generating implementation prompt...
-[SUCCESS] Implementation complete with 5 files changed
-[INFO] Creating PR: "Fix #234: Add user authentication"
-```
-
-**Python Implementation:**
 ```bash
 $ ./claude-tasker-py 234
 🔄 Processing issue #234...

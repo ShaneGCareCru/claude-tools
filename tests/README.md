@@ -1,6 +1,6 @@
 # Claude-Tasker Test Suite
 
-This directory contains comprehensive tests for the `claude-tasker` bash script, covering all features and functionality required for potential Python migration.
+This directory contains comprehensive tests for the `claude-tasker-py` Python implementation, covering all features and functionality.
 
 ## Test Structure
 
@@ -124,7 +124,7 @@ pytest --cov=. --cov-report=html
 - `mock_subprocess` - Generic subprocess mocking
 - `mock_gh_cli` - GitHub CLI command mocking
 - `mock_claude_cli` - Claude CLI command mocking
-- `claude_tasker_script` - Path to the claude-tasker script
+- `claude_tasker_script` - Path to the claude-tasker-py script
 
 ## Test Coverage Goals
 
@@ -135,13 +135,13 @@ The test suite aims to achieve:
 - **All external dependencies** mocked and tested
 - **All workflows** tested end-to-end
 
-## Future Migration Support
+## Test Benefits
 
-These tests provide a robust foundation for:
-1. **Python rewrite validation** - Ensure feature parity during migration
-2. **Regression testing** - Catch any functionality loss during refactoring
+These tests provide:
+1. **Feature validation** - Ensure all functionality works as expected
+2. **Regression testing** - Catch any functionality loss during updates
 3. **Documentation** - Tests serve as executable specifications
-4. **Confidence** - Comprehensive testing reduces migration risk
+4. **Confidence** - Comprehensive testing ensures reliability
 
 ## Contributing
 

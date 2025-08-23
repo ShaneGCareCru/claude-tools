@@ -4,41 +4,51 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-This is a collection of enhanced tools for working with Claude Code in GitHub workflows, with the primary tool being `claude-tasker` - an advanced task runner that provides context-aware wrapper for Claude Code with GitHub integration.
+This is a collection of enhanced tools for working with Claude Code in GitHub workflows, with the primary tool being `claude-tasker-py` - an advanced Python-based task runner that provides context-aware wrapper for Claude Code with GitHub integration.
 
 ## Key Architecture
 
-### Claude Tasker
+### Claude Tasker (Python Implementation)
 - **Two-stage execution**: Meta-prompt generation → Claude execution (eliminates meta-prompt issues)
-- **Agent-based architecture**: Uses specialized agents in `.claude/agents/` for different task types
+- **Modular architecture**: Object-oriented design with specialized modules for different responsibilities
 - **Lyra-Dev 4-D methodology**: DECONSTRUCT → DIAGNOSE → DEVELOP → DELIVER
 - **GitHub integration**: Direct interaction with issues, PRs, and comments via `gh` CLI
 - **Status verification protocol**: Detects false completion claims
 - **AUDIT-AND-IMPLEMENT workflow**: Audits gaps before implementation
+- **Comprehensive testing**: Unit tests, integration tests, and mocking support
 
 ### File Structure
-- `claude-tasker`: Main bash script with agent coordination logic
-- `.claude/agents/`: Directory containing specialized agent definitions (auto-created if missing)
-- `test-repo/mixologist/`: Example FastAPI application for testing
+- `claude-tasker-py`: Main executable Python wrapper script
+- `src/claude_tasker/`: Python package containing core implementation
+  - `cli.py`: Command-line interface and argument parsing
+  - `workflow_logic.py`: Core orchestration and task management
+  - `prompt_builder.py`: LLM prompt generation and execution
+  - `github_client.py`: GitHub API integration
+  - `environment_validator.py`: Dependency validation
+  - `workspace_manager.py`: Git operations and file management
+  - `pr_body_generator.py`: PR description generation
+  - `logging_config.py`: Logging configuration
+- `tests/`: Comprehensive test suite
+- `techflow-demo/`: Example React application for testing
 
 ## Common Commands
 
 ### Running Claude Tasker
 ```bash
 # Process single GitHub issue
-./claude-tasker <issue_number>
+./claude-tasker-py <issue_number>
 
 # Process range of issues
-./claude-tasker <start>-<end>
+./claude-tasker-py <start>-<end>
 
 # Review PR (read-only)
-./claude-tasker --review-pr <pr_number>
+./claude-tasker-py --review-pr <pr_number>
 
 # Analyze bug and create issue
-./claude-tasker --bug "<description>"
+./claude-tasker-py --bug "<description>"
 
 # Interactive mode (default is headless)
-./claude-tasker <issue_number> --interactive
+./claude-tasker-py <issue_number> --interactive
 ```
 
 ### Script Options
@@ -46,30 +56,43 @@ This is a collection of enhanced tools for working with Claude Code in GitHub wo
 - `--prompt-only`: Generate prompts without execution
 - `--timeout <seconds>`: Set delay between tasks (default: 10)
 - `--dry-run`: Skip actual execution
+- `--coder <claude|llm>`: Choose LLM tool (default: claude)
 
 ## Development Guidelines
 
 ### Required Dependencies
+- `Python 3.7+` - Required for running the Python implementation
 - `gh` - GitHub CLI (required for API interactions)
 - `jq` - JSON processor
-- `claude` - Claude Code CLI (not required for prompt-only mode)
+- `claude` - Claude Code CLI (primary LLM tool)
 - `git` - Version control
-- `llm` - Optional, falls back to Claude if not available
+- `llm` - Optional fallback LLM tool
+
+### Python Package Dependencies
+Install with: `pip install -r requirements.txt`
+- `PyGithub` - GitHub API client
+- `click` - Command-line interface creation
+- `rich` - Terminal formatting and colors
+- `python-dotenv` - Environment variable management
 
 ### Git Workflow
 - Always creates timestamped branches: `issue-<number>-<timestamp>`
-- Commits with standardized messages: `🤖 <branch>: automated <mode> via agent coordination`
+- Commits with standardized messages following conventional commit format
 - Only creates PRs when actual code changes are made
 - Gracefully handles "already complete" cases
 
-### Agent System
-- Agents are stored in `.claude/agents/` as markdown files
-- Each agent has specialized capabilities (e.g., `github-issue-implementer`, `pr-reviewer`)
-- Agents follow the 4-D methodology for structured problem-solving
-- Script auto-creates essential agents if missing
+### Testing
+- Run tests with: `pytest tests/`
+- Test coverage: `pytest --cov=src/claude_tasker tests/`
+- Integration tests: `pytest tests/test_integration.py`
 
 ### Error Handling
 - Exponential backoff for API rate limits
-- Comprehensive logging with color-coded levels
+- Comprehensive logging with structured format
 - Validation of environment before execution
 - Graceful degradation when tools are missing
+- Automatic fallback between Claude CLI and LLM tools
+
+## Historical Note
+
+A deprecated bash implementation has been archived in `archive/bash_implementation/` for historical reference. The Python implementation is the actively maintained version.
