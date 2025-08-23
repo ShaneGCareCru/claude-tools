@@ -31,11 +31,10 @@ class WorkflowLogic:
                  timeout_between_tasks: float = 10.0,
                  interactive_mode: bool = None,
                  coder: str = "claude",
-                 base_branch: str = "main"):
+                 base_branch: str = None):
         self.timeout_between_tasks = timeout_between_tasks
         self.interactive_mode = interactive_mode if interactive_mode is not None else os.isatty(0)
         self.coder = coder
-        self.base_branch = base_branch
         
         # Initialize components
         self.env_validator = EnvironmentValidator()
@@ -44,8 +43,24 @@ class WorkflowLogic:
         self.prompt_builder = PromptBuilder()
         self.pr_body_generator = PRBodyGenerator()
         
+        # Detect the default branch if not specified
+        if base_branch is None:
+            self.base_branch = self._detect_default_branch()
+        else:
+            self.base_branch = base_branch
+        
         # Load project context
         self.claude_md_content = self._load_claude_md()
+    
+    def _detect_default_branch(self) -> str:
+        """Detect the repository's default branch."""
+        # Try to get from GitHub API first
+        default_branch = self.github_client.get_default_branch()
+        if default_branch:
+            return default_branch
+        
+        # Fall back to workspace manager detection
+        return self.workspace_manager.detect_main_branch()
     
     def _load_claude_md(self) -> str:
         """Load CLAUDE.md content for project context."""

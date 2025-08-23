@@ -202,6 +202,20 @@ class GitHubClient:
         
         return None
     
+    def get_default_branch(self) -> Optional[str]:
+        """Get the repository's default branch name."""
+        cmd = ['repo', 'view', '--json', 'defaultBranchRef']
+        
+        result = self._run_gh_command(cmd)
+        if result.returncode != 0:
+            return None
+        
+        try:
+            data = json.loads(result.stdout)
+            return data.get('defaultBranchRef', {}).get('name')
+        except json.JSONDecodeError:
+            return None
+    
     def get_project_info(self, project_number: int) -> Optional[Dict[str, Any]]:
         """Get project information."""
         cmd = ['project', 'view', str(project_number), '--json', 'title,body']
