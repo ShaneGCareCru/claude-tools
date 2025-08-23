@@ -2374,8 +2374,23 @@ process_single_task() {
         return 0
     fi
 
-    # Full automation mode - workspace hygiene first
-    workspace_hygiene
+    # Full automation mode - check if workspace needs cleaning
+    # Only perform workspace hygiene if there are actual changes
+    if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+        log_info "Workspace has changes, cleaning before task execution..."
+        
+        # In interactive mode (not CI), confirm with user
+        if [ -t 0 ] && [ -t 1 ] && [ -z "$CLAUDE_TASKER_AUTO_CLEANUP" ] && [ "$CI" != "true" ] && [ "$GITHUB_ACTIONS" != "true" ]; then
+            if ! confirm_workspace_cleanup; then
+                log_error "Workspace cleanup cancelled by user"
+                exit 1
+            fi
+        fi
+        
+        workspace_hygiene
+    else
+        log_info "Workspace is clean, skipping hygiene step"
+    fi
 
     # Smart branch management: only for implementation mode
     local branch_name
