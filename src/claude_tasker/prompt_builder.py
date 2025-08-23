@@ -372,7 +372,7 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
             
             try:
                 # Run Claude in headless mode to generate the review
-                cmd = ['claude', '-p', '--permission-mode', 'bypassPermissions']
+                cmd = ['claude', '-p', prompt_file, '--permission-mode', 'bypassPermissions']
                 
                 print(f"[DEBUG] Running command: {' '.join(cmd)}")
                 print(f"[DEBUG] Prompt length: {len(prompt)} chars")
@@ -380,7 +380,6 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                 # Execute with longer timeout for review generation
                 result = subprocess.run(
                     cmd,
-                    input=prompt,
                     capture_output=True,
                     text=True,
                     check=False,
