@@ -37,6 +37,9 @@ def parse_pr_range(pr_arg: str) -> tuple[Optional[int], Optional[int]]:
 
 def extract_pr_number(pr_url: str) -> Optional[int]:
     """Safely extract PR number from GitHub URL."""
+    if pr_url is None:
+        return None
+    
     try:
         # Handle both full URLs and PR numbers
         # Example: https://github.com/owner/repo/pull/123

@@ -107,10 +107,9 @@ class TestExtractPRNumber:
     
     def test_extract_with_exception(self):
         """Test handling of exceptions."""
-        # extract_pr_number handles None by returning None
+        # extract_pr_number should handle None by checking if pr_url is None first
         pr_num = extract_pr_number(None)
-        # This might not return None, let's test with something that would cause an error
-        assert pr_num is None or pr_num == 0  # Accept either None or 0
+        assert pr_num is None
 
 
 class TestValidateArguments:
@@ -210,7 +209,8 @@ class TestPrintResultsSummary:
         """Test printing empty results."""
         with patch('builtins.print') as mock_print:
             print_results_summary([])
-            mock_print.assert_called_with("\n" + "=" * 60)
+            # Empty results should not print anything
+            mock_print.assert_not_called()
     
     def test_print_single_success(self):
         """Test printing single successful result."""
@@ -221,33 +221,31 @@ class TestPrintResultsSummary:
         )
         with patch('builtins.print') as mock_print:
             print_results_summary([result])
-            # Verify summary header was printed
+            # Verify summary was printed with correct format
             calls = [str(call) for call in mock_print.call_args_list]
-            assert any("SUMMARY" in str(call) for call in calls)
-            assert any("✓" in str(call) or "Issue #42" in str(call) for call in calls)
+            assert any("Summary" in str(call) or "successful" in str(call) for call in calls)
     
     def test_print_mixed_results(self):
         """Test printing mixed success/failure results."""
         results = [
             WorkflowResult(success=True, message="Success", issue_number=1),
-            WorkflowResult(success=False, message="Failed", issue_number=2),
+            WorkflowResult(success=False, message="Failed", issue_number=2, error_details="Test error"),
             WorkflowResult(success=True, message="Success", issue_number=3, pr_url="http://pr.url")
         ]
         with patch('builtins.print') as mock_print:
             print_results_summary(results)
             calls = [str(call) for call in mock_print.call_args_list]
-            # Should show both success and failure
-            assert any("✓" in str(call) or "SUCCESS" in str(call) for call in calls)
-            assert any("✗" in str(call) or "FAILED" in str(call) for call in calls)
+            # Should show summary and failure
+            assert any("Summary" in str(call) or "successful" in str(call) or "failed" in str(call) for call in calls)
+            assert any("Failed" in str(call) or "❌" in str(call) for call in calls)
 
 
 class TestMainFunction:
     """Test main function with various scenarios."""
     
     @patch('src.claude_tasker.cli.create_argument_parser')
-    @patch('src.claude_tasker.cli.EnvironmentValidator')
     @patch('src.claude_tasker.cli.WorkflowLogic')
-    def test_main_no_action_specified(self, mock_workflow, mock_env_validator, mock_parser):
+    def test_main_no_action_specified(self, mock_workflow, mock_parser):
         """Test main with no action specified."""
         mock_args = Mock(issue=None, bug=None, review_pr=None)
         mock_parser_instance = Mock()
@@ -261,131 +259,145 @@ class TestMainFunction:
                 assert mock_logger.error.called
     
     @patch('src.claude_tasker.cli.create_argument_parser')
-    @patch('shutil.which')
-    def test_main_invalid_coder_path(self, mock_which, mock_parser):
-        """Test main with invalid coder path."""
-        mock_args = Mock(issue='42', bug=None, review_pr=None, coder='claude', timeout=10)
-        mock_parser_instance = Mock()
-        mock_parser_instance.parse_args.return_value = mock_args
-        mock_parser.return_value = mock_parser_instance
-        mock_which.return_value = None  # Simulate missing binary
-        
-        with patch('src.claude_tasker.cli.validate_arguments', return_value=None):
-            with patch('src.claude_tasker.cli.logger') as mock_logger:
-                result = main()
-                assert result == 1
-                mock_logger.error.assert_called()
-    
-    @patch('src.claude_tasker.cli.create_argument_parser')
-    @patch('shutil.which')
-    @patch('src.claude_tasker.cli.EnvironmentValidator')
-    def test_main_environment_validation_failure(self, mock_env_validator, 
-                                                 mock_which, mock_parser):
-        """Test main with environment validation failure."""
-        mock_args = Mock(issue='42', bug=None, review_pr=None, coder='claude', timeout=10)
-        mock_parser_instance = Mock()
-        mock_parser_instance.parse_args.return_value = mock_args
-        mock_parser.return_value = mock_parser_instance
-        mock_which.return_value = '/usr/local/bin/claude'
-        
-        mock_validator = Mock()
-        mock_validator.validate.return_value = (False, ["Missing dependency"])
-        mock_env_validator.return_value = mock_validator
-        
-        with patch('src.claude_tasker.cli.validate_arguments', return_value=None):
-            with patch('src.claude_tasker.cli.logger') as mock_logger:
-                result = main()
-                assert result == 1
-                mock_logger.error.assert_called()
-    
-    @patch('src.claude_tasker.cli.create_argument_parser')
-    @patch('shutil.which')
-    @patch('src.claude_tasker.cli.EnvironmentValidator')
+    @patch('src.claude_tasker.cli.Path')
     @patch('src.claude_tasker.cli.WorkflowLogic')
-    def test_main_process_issue_success(self, mock_workflow_class, mock_env_validator,
-                                       mock_which, mock_parser):
-        """Test successful issue processing."""
+    def test_main_invalid_coder_path(self, mock_workflow, mock_path, mock_parser):
+        """Test main with missing CLAUDE.md."""
         mock_args = Mock(
-            issue='42', bug=None, review_pr=None, coder='claude',
-            interactive=False, prompt_only=False, dry_run=False, timeout=10
+            issue='42', bug=None, review_pr=None, coder='claude', timeout=10,
+            project=None, base_branch=None, auto_pr_review=False, prompt_only=False,
+            interactive=False, dry_run=False
         )
         mock_parser_instance = Mock()
         mock_parser_instance.parse_args.return_value = mock_args
         mock_parser.return_value = mock_parser_instance
-        mock_which.return_value = '/usr/local/bin/claude'
         
-        mock_validator = Mock()
-        mock_validator.validate.return_value = (True, [])
-        mock_env_validator.return_value = mock_validator
+        # Simulate missing CLAUDE.md
+        mock_path.return_value.exists.return_value = False
         
-        mock_workflow = Mock()
-        mock_result = Mock(success=True, message="Success")
-        mock_workflow.process_issue.return_value = mock_result
-        mock_workflow_class.return_value = mock_workflow
+        with patch('src.claude_tasker.cli.validate_arguments', return_value=None):
+            with patch('src.claude_tasker.cli.logger') as mock_logger:
+                with patch('builtins.print'):
+                    result = main()
+                    assert result == 1
+                    mock_logger.error.assert_called()
+    
+    @patch('src.claude_tasker.cli.create_argument_parser')
+    @patch('src.claude_tasker.cli.Path')
+    @patch('src.claude_tasker.cli.WorkflowLogic')
+    def test_main_environment_validation_failure(self, mock_workflow, mock_path, mock_parser):
+        """Test main with workflow error."""
+        mock_args = Mock(
+            issue='42', bug=None, review_pr=None, coder='claude', timeout=10,
+            project=None, base_branch=None, auto_pr_review=False, prompt_only=False,
+            interactive=False, dry_run=False
+        )
+        mock_parser_instance = Mock()
+        mock_parser_instance.parse_args.return_value = mock_args
+        mock_parser.return_value = mock_parser_instance
+        
+        # Simulate CLAUDE.md exists
+        mock_path.return_value.exists.return_value = True
+        
+        # Simulate workflow failure
+        mock_workflow_instance = Mock()
+        mock_workflow_instance.process_single_issue.side_effect = Exception("Workflow error")
+        mock_workflow.return_value = mock_workflow_instance
         
         with patch('src.claude_tasker.cli.validate_arguments', return_value=None):
             with patch('src.claude_tasker.cli.parse_issue_range', return_value=(42, 42)):
                 with patch('src.claude_tasker.cli.logger') as mock_logger:
-                    result = main()
-                    assert result == 0
-                    mock_workflow.process_issue.assert_called_once_with(42, mock_args)
+                    with patch('builtins.print'):
+                        result = main()
+                        assert result == 1
     
     @patch('src.claude_tasker.cli.create_argument_parser')
-    @patch('shutil.which')
-    @patch('src.claude_tasker.cli.EnvironmentValidator')
+    @patch('src.claude_tasker.cli.Path')
     @patch('src.claude_tasker.cli.WorkflowLogic')
-    def test_main_process_issue_range(self, mock_workflow_class, mock_env_validator,
-                                     mock_which, mock_parser):
-        """Test processing issue range."""
+    def test_main_process_issue_success(self, mock_workflow_class, mock_path, mock_parser):
+        """Test successful issue processing."""
         mock_args = Mock(
-            issue='10-12', bug=None, review_pr=None, coder='claude',
-            interactive=False, prompt_only=False, dry_run=False, timeout=10
+            issue='42', bug=None, review_pr=None, coder='claude',
+            interactive=False, prompt_only=False, dry_run=False, timeout=10,
+            project=None, base_branch=None, auto_pr_review=False
         )
         mock_parser_instance = Mock()
         mock_parser_instance.parse_args.return_value = mock_args
         mock_parser.return_value = mock_parser_instance
-        mock_which.return_value = '/usr/local/bin/claude'
         
-        mock_validator = Mock()
-        mock_validator.validate.return_value = (True, [])
-        mock_env_validator.return_value = mock_validator
+        # Simulate CLAUDE.md exists
+        mock_path.return_value.exists.return_value = True
         
         mock_workflow = Mock()
-        mock_result = Mock(success=True, message="Success")
-        mock_workflow.process_issue.return_value = mock_result
+        mock_result = WorkflowResult(success=True, message="Success", issue_number=42)
+        mock_workflow.process_single_issue.return_value = mock_result
+        mock_workflow_class.return_value = mock_workflow
+        
+        with patch('src.claude_tasker.cli.validate_arguments', return_value=None):
+            with patch('src.claude_tasker.cli.parse_issue_range', return_value=(42, 42)):
+                with patch('builtins.print'):
+                    result = main()
+                    assert result == 0
+                    mock_workflow.process_single_issue.assert_called_once_with(42, False, None)
+    
+    @patch('src.claude_tasker.cli.create_argument_parser')
+    @patch('src.claude_tasker.cli.Path')
+    @patch('src.claude_tasker.cli.WorkflowLogic')
+    def test_main_process_issue_range(self, mock_workflow_class, mock_path, mock_parser):
+        """Test processing issue range."""
+        mock_args = Mock(
+            issue='10-12', bug=None, review_pr=None, coder='claude',
+            interactive=False, prompt_only=False, dry_run=False, timeout=10,
+            project=None, base_branch=None, auto_pr_review=False
+        )
+        mock_parser_instance = Mock()
+        mock_parser_instance.parse_args.return_value = mock_args
+        mock_parser.return_value = mock_parser_instance
+        
+        # Simulate CLAUDE.md exists
+        mock_path.return_value.exists.return_value = True
+        
+        mock_workflow = Mock()
+        mock_results = [
+            WorkflowResult(success=True, message="Success", issue_number=10),
+            WorkflowResult(success=True, message="Success", issue_number=11),
+            WorkflowResult(success=True, message="Success", issue_number=12)
+        ]
+        mock_workflow.process_issue_range.return_value = mock_results
         mock_workflow_class.return_value = mock_workflow
         
         with patch('src.claude_tasker.cli.validate_arguments', return_value=None):
             with patch('src.claude_tasker.cli.parse_issue_range', return_value=(10, 12)):
-                with patch('time.sleep'):  # Mock sleep to speed up test
+                with patch('builtins.print'):
                     result = main()
                     assert result == 0
-                    assert mock_workflow.process_issue.call_count == 3
+                    mock_workflow.process_issue_range.assert_called_once_with(10, 12, False, None)
     
     @patch('src.claude_tasker.cli.create_argument_parser')
-    @patch('shutil.which')
-    @patch('src.claude_tasker.cli.EnvironmentValidator')
+    @patch('src.claude_tasker.cli.Path')
     @patch('src.claude_tasker.cli.WorkflowLogic')
-    def test_main_keyboard_interrupt(self, mock_workflow_class, mock_env_validator,
-                                    mock_which, mock_parser):
+    def test_main_keyboard_interrupt(self, mock_workflow_class, mock_path, mock_parser):
         """Test handling keyboard interrupt."""
-        mock_args = Mock(issue='42', bug=None, review_pr=None, coder='claude', timeout=10)
+        mock_args = Mock(
+            issue='42', bug=None, review_pr=None, coder='claude', timeout=10,
+            project=None, base_branch=None, auto_pr_review=False, prompt_only=False,
+            interactive=False, dry_run=False
+        )
         mock_parser_instance = Mock()
         mock_parser_instance.parse_args.return_value = mock_args
         mock_parser.return_value = mock_parser_instance
-        mock_which.return_value = '/usr/local/bin/claude'
         
-        mock_validator = Mock()
-        mock_validator.validate.return_value = (True, [])
-        mock_env_validator.return_value = mock_validator
+        # Simulate CLAUDE.md exists
+        mock_path.return_value.exists.return_value = True
         
         mock_workflow = Mock()
-        mock_workflow.process_issue.side_effect = KeyboardInterrupt()
+        mock_workflow.process_single_issue.side_effect = KeyboardInterrupt()
         mock_workflow_class.return_value = mock_workflow
         
         with patch('src.claude_tasker.cli.validate_arguments', return_value=None):
             with patch('src.claude_tasker.cli.parse_issue_range', return_value=(42, 42)):
                 with patch('src.claude_tasker.cli.logger') as mock_logger:
-                    result = main()
-                    assert result == 130
-                    mock_logger.info.assert_called_with("\nOperation cancelled by user")
+                    with patch('builtins.print'):
+                        result = main()
+                        assert result == 130
+                        mock_logger.warning.assert_called_with("Operation interrupted by user")

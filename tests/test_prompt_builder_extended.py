@@ -18,326 +18,276 @@ class TestPromptBuilderExtended:
         """Create a PromptBuilder instance."""
         return PromptBuilder()
     
-    def test_build_bug_analysis_prompt_with_exception(self, prompt_builder):
-        """Test build_bug_analysis_prompt with exception."""
-        with patch('src.claude_tasker.prompt_builder.logger') as mock_logger:
-            # Force an exception by passing None
-            result = prompt_builder.build_bug_analysis_prompt(None)
-            
-            assert result is None
-            mock_logger.error.assert_called()
-    
-    def test_build_pr_review_prompt_with_exception(self, prompt_builder):
-        """Test build_pr_review_prompt with exception."""
-        # Create PR data that will cause an exception
-        pr_data = None
+    def test_generate_bug_analysis_prompt(self, prompt_builder):
+        """Test generate_bug_analysis_prompt."""
+        bug_description = "Application crashes on startup"
+        claude_md_content = "Project context"
         
-        with patch('src.claude_tasker.prompt_builder.logger') as mock_logger:
-            result = prompt_builder.build_pr_review_prompt(pr_data)
-            
-            assert result is None
-            mock_logger.error.assert_called()
-    
-    def test_execute_claude_with_prompt_interactive_mode(self, prompt_builder):
-        """Test execute_claude_with_prompt in interactive mode."""
-        prompt = "Test prompt"
-        args = Mock(interactive=True, coder='claude')
-        
-        mock_result = Mock(returncode=0, stdout="Success", stderr="")
-        
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
-            with patch('tempfile.NamedTemporaryFile') as mock_temp:
-                mock_file = Mock()
-                mock_file.name = '/tmp/test.txt'
-                mock_temp.return_value.__enter__.return_value = mock_file
-                
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    result = prompt_builder.execute_claude_with_prompt(prompt, args)
+        result = prompt_builder.generate_bug_analysis_prompt(bug_description, claude_md_content)
         
         assert result is not None
-        assert result['success'] is True
-        assert result['response'] == "Success"
-        
-        # Verify interactive flag was used
-        call_args = mock_run.call_args[0][0]
-        assert '--permission-mode' not in call_args  # Interactive mode doesn't use permission mode
+        assert isinstance(result, str)
+        assert bug_description in result
     
-    def test_execute_claude_with_prompt_llm_coder(self, prompt_builder):
-        """Test execute_claude_with_prompt with llm coder."""
-        prompt = "Test prompt"
-        args = Mock(interactive=False, coder='llm')
-        
-        mock_result = Mock(returncode=0, stdout="LLM Success", stderr="")
-        
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
-            with patch('tempfile.NamedTemporaryFile') as mock_temp:
-                mock_file = Mock()
-                mock_file.name = '/tmp/test.txt'
-                mock_temp.return_value.__enter__.return_value = mock_file
-                
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    result = prompt_builder.execute_claude_with_prompt(prompt, args)
-        
-        assert result is not None
-        assert result['success'] is True
-        assert result['response'] == "LLM Success"
-        
-        # Verify llm command was used
-        call_args = mock_run.call_args[0][0]
-        assert call_args[0] == 'llm'
-    
-    def test_execute_claude_with_prompt_command_failure(self, prompt_builder):
-        """Test execute_claude_with_prompt when command fails."""
-        prompt = "Test prompt"
-        args = Mock(interactive=False, coder='claude')
-        
-        mock_result = Mock(returncode=1, stdout="", stderr="Error occurred")
-        
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
-            with patch('tempfile.NamedTemporaryFile') as mock_temp:
-                mock_file = Mock()
-                mock_file.name = '/tmp/test.txt'
-                mock_temp.return_value.__enter__.return_value = mock_file
-                
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    with patch('src.claude_tasker.prompt_builder.logger') as mock_logger:
-                        result = prompt_builder.execute_claude_with_prompt(prompt, args)
-        
-        assert result is None
-        mock_logger.error.assert_called()
-    
-    def test_execute_claude_with_prompt_timeout(self, prompt_builder):
-        """Test execute_claude_with_prompt with timeout."""
-        prompt = "Test prompt"
-        args = Mock(interactive=False, coder='claude')
-        
-        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('cmd', 300)):
-            with patch('tempfile.NamedTemporaryFile') as mock_temp:
-                mock_file = Mock()
-                mock_file.name = '/tmp/test.txt'
-                mock_temp.return_value.__enter__.return_value = mock_file
-                
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    with patch('src.claude_tasker.prompt_builder.logger') as mock_logger:
-                        result = prompt_builder.execute_claude_with_prompt(prompt, args)
-        
-        assert result is None
-        mock_logger.error.assert_called_with("Claude command timed out after 5 minutes")
-    
-    def test_execute_claude_with_prompt_generic_exception(self, prompt_builder):
-        """Test execute_claude_with_prompt with generic exception."""
-        prompt = "Test prompt"
-        args = Mock(interactive=False, coder='claude')
-        
-        with patch('subprocess.run', side_effect=Exception("Unexpected error")):
-            with patch('tempfile.NamedTemporaryFile') as mock_temp:
-                mock_file = Mock()
-                mock_file.name = '/tmp/test.txt'
-                mock_temp.return_value.__enter__.return_value = mock_file
-                
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    with patch('src.claude_tasker.prompt_builder.logger') as mock_logger:
-                        result = prompt_builder.execute_claude_with_prompt(prompt, args)
-        
-        assert result is None
-        mock_logger.error.assert_called()
-    
-    def test_execute_claude_review_success(self, prompt_builder):
-        """Test execute_claude_review with successful execution."""
-        prompt = "Review prompt"
-        
-        mock_result = Mock(returncode=0, stdout="Review output", stderr="")
-        
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
-            with patch('tempfile.NamedTemporaryFile') as mock_temp:
-                mock_file = Mock()
-                mock_file.name = '/tmp/review.txt'
-                mock_temp.return_value.__enter__.return_value = mock_file
-                
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    result = prompt_builder.execute_claude_review(prompt)
-        
-        assert result is not None
-        assert result['success'] is True
-        assert result['response'] == "Review output"
-        
-        # Verify command includes review-specific settings
-        call_args = mock_run.call_args[0][0]
-        assert 'claude' in call_args
-        assert '--permission-mode' in call_args
-        assert 'bypassPermissions' in call_args
-    
-    def test_execute_claude_review_command_failure(self, prompt_builder):
-        """Test execute_claude_review when command fails."""
-        prompt = "Review prompt"
-        
-        mock_result = Mock(returncode=1, stdout="", stderr="Review error")
-        
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
-            with patch('tempfile.NamedTemporaryFile') as mock_temp:
-                mock_file = Mock()
-                mock_file.name = '/tmp/review.txt'
-                mock_temp.return_value.__enter__.return_value = mock_file
-                
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    with patch('src.claude_tasker.prompt_builder.logger') as mock_logger:
-                        result = prompt_builder.execute_claude_review(prompt)
-        
-        assert result is None
-        mock_logger.error.assert_called()
-    
-    def test_execute_claude_review_timeout(self, prompt_builder):
-        """Test execute_claude_review with timeout."""
-        prompt = "Review prompt"
-        
-        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('cmd', 1200)):
-            with patch('tempfile.NamedTemporaryFile') as mock_temp:
-                mock_file = Mock()
-                mock_file.name = '/tmp/review.txt'
-                mock_temp.return_value.__enter__.return_value = mock_file
-                
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    with patch('src.claude_tasker.prompt_builder.logger') as mock_logger:
-                        result = prompt_builder.execute_claude_review(prompt)
-        
-        assert result is None
-        mock_logger.error.assert_called_with("Claude review command timed out")
-    
-    def test_execute_claude_review_generic_exception(self, prompt_builder):
-        """Test execute_claude_review with generic exception."""
-        prompt = "Review prompt"
-        
-        with patch('subprocess.run', side_effect=Exception("Review exception")):
-            with patch('tempfile.NamedTemporaryFile') as mock_temp:
-                mock_file = Mock()
-                mock_file.name = '/tmp/review.txt'
-                mock_temp.return_value.__enter__.return_value = mock_file
-                
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    with patch('src.claude_tasker.prompt_builder.logger') as mock_logger:
-                        result = prompt_builder.execute_claude_review(prompt)
-        
-        assert result is None
-        mock_logger.error.assert_called()
-    
-    def test_build_audit_prompt_with_context_files(self, prompt_builder):
-        """Test build_audit_prompt with context files."""
-        issue_data = IssueData(
-            number=42,
-            title="Test Issue",
-            body="Test body with context",
-            labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+    def test_generate_pr_review_prompt(self, prompt_builder):
+        """Test generate_pr_review_prompt."""
+        pr_data = PRData(
+            number=123,
+            title="Fix bug",
+            body="This PR fixes a bug",
+            head_ref="fix-branch",
+            base_ref="main",
+            author="testuser",
+            additions=10,
+            deletions=5,
+            changed_files=2,
+            url="https://github.com/test/repo/pull/123"
         )
+        pr_diff = "diff content"
         
-        # Mock file reading
-        with patch('builtins.open', mock_open(read_data="File content")):
-            with patch('os.path.exists', return_value=True):
-                with patch('os.path.isfile', return_value=True):
-                    prompt = prompt_builder.build_audit_prompt(issue_data)
+        result = prompt_builder.generate_pr_review_prompt(pr_data, pr_diff)
         
-        assert prompt is not None
-        assert "Test Issue" in prompt
-        assert "DECONSTRUCT" in prompt
+        assert result is not None
+        assert isinstance(result, str)
+        assert pr_data.title in result
     
-    def test_build_implementation_prompt_with_audit_results(self, prompt_builder):
-        """Test build_implementation_prompt with audit results."""
+    def test_generate_lyra_dev_prompt(self, prompt_builder):
+        """Test generate_lyra_dev_prompt."""
         issue_data = IssueData(
             number=42,
             title="Test Issue",
             body="Test body",
-            labels=["enhancement"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            labels=["bug"],
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
+        claude_md_content = "Project context"
         
-        audit_results = "Audit found these issues:\n- Issue 1\n- Issue 2"
+        result = prompt_builder.generate_lyra_dev_prompt(issue_data, claude_md_content)
         
-        prompt = prompt_builder.build_implementation_prompt(issue_data, audit_results)
-        
-        assert prompt is not None
-        assert "Test Issue" in prompt
-        assert "IMPLEMENT" in prompt
-        assert audit_results in prompt
+        assert result is not None
+        assert isinstance(result, str)
+        assert issue_data.title in result
     
-    def test_build_pr_review_prompt_with_full_data(self, prompt_builder):
-        """Test build_pr_review_prompt with complete PR data."""
-        pr_data = PRData(
-            number=123,
-            title="Test PR",
-            body="PR description",
-            state="open",
-            head_branch="feature-branch",
-            base_branch="main",
-            diff="+ Added line\n- Removed line",
-            commits=[
-                {'sha': 'abc123', 'message': 'First commit'},
-                {'sha': 'def456', 'message': 'Second commit'}
-            ],
-            files_changed=['file1.py', 'file2.py'],
-            additions=50,
-            deletions=10,
-            changed_files_count=2,
-            review_comments=[],
-            labels=["review"],
-            assignee="developer",
-            milestone="v1.0",
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
-        )
-        
-        prompt = prompt_builder.build_pr_review_prompt(pr_data)
-        
-        assert prompt is not None
-        assert "Test PR" in prompt
-        assert "Review the following Pull Request" in prompt
-        assert "feature-branch" in prompt
-        assert "main" in prompt
-    
-    def test_execute_claude_with_prompt_cleanup_on_exception(self, prompt_builder):
-        """Test that temp file is cleaned up even on exception."""
+    def test_build_with_llm(self, prompt_builder):
+        """Test build_with_llm method."""
         prompt = "Test prompt"
-        args = Mock(interactive=False, coder='claude')
         
-        temp_file_path = '/tmp/test_file.txt'
+        mock_result = Mock(returncode=0, stdout="LLM Success", stderr="")
         
-        with patch('tempfile.NamedTemporaryFile') as mock_temp:
-            mock_file = Mock()
-            mock_file.name = temp_file_path
-            mock_temp.return_value.__enter__.return_value = mock_file
-            
-            with patch('subprocess.run', side_effect=Exception("Test exception")):
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    with patch('src.claude_tasker.prompt_builder.logger'):
-                        result = prompt_builder.execute_claude_with_prompt(prompt, args)
-            
-            # Verify cleanup was called
-            mock_unlink.assert_called_once()
-            assert result is None
+        with patch('subprocess.run', return_value=mock_result):
+            with patch('tempfile.NamedTemporaryFile'):
+                result = prompt_builder.build_with_llm(prompt)
+        
+        assert result is not None
+        assert result['success'] is True
     
-    def test_execute_claude_review_cleanup_on_exception(self, prompt_builder):
-        """Test that temp file is cleaned up in review even on exception."""
-        prompt = "Review prompt"
+    def test_build_with_llm_failure(self, prompt_builder):
+        """Test build_with_llm with command failure."""
+        prompt = "Test prompt"
         
-        temp_file_path = '/tmp/review_file.txt'
+        mock_result = Mock(returncode=1, stdout="", stderr="Error")
         
-        with patch('tempfile.NamedTemporaryFile') as mock_temp:
-            mock_file = Mock()
-            mock_file.name = temp_file_path
-            mock_temp.return_value.__enter__.return_value = mock_file
+        with patch('subprocess.run', return_value=mock_result):
+            with patch('tempfile.NamedTemporaryFile'):
+                result = prompt_builder.build_with_llm(prompt)
+        
+        assert result is not None
+        assert result['success'] is False
+    
+    def test_build_with_claude(self, prompt_builder):
+        """Test build_with_claude method."""
+        prompt = "Test prompt"
+        
+        mock_result = Mock(returncode=0, stdout="Claude Success", stderr="")
+        
+        with patch('subprocess.run', return_value=mock_result):
+            with patch('tempfile.NamedTemporaryFile'):
+                result = prompt_builder.build_with_claude(prompt)
+        
+        assert result is not None
+        assert result['success'] is True
+    
+    def test_build_with_claude_execute_mode(self, prompt_builder):
+        """Test build_with_claude in execute mode."""
+        prompt = "Test prompt"
+        
+        mock_result = Mock(returncode=0, stdout="Claude Success", stderr="")
+        
+        with patch('subprocess.run', return_value=mock_result):
+            with patch('tempfile.NamedTemporaryFile'):
+                result = prompt_builder.build_with_claude(prompt, execute_mode=True)
+        
+        assert result is not None
+        assert result['success'] is True
+    
+    def test_build_with_claude_review_mode(self, prompt_builder):
+        """Test build_with_claude in review mode."""
+        prompt = "Test prompt"
+        
+        mock_result = Mock(returncode=0, stdout="Review Success", stderr="")
+        
+        with patch('subprocess.run', return_value=mock_result):
+            with patch('tempfile.NamedTemporaryFile'):
+                result = prompt_builder.build_with_claude(prompt, review_mode=True)
+        
+        assert result is not None
+        assert result['success'] is True
+    
+    def test_build_with_claude_timeout(self, prompt_builder):
+        """Test build_with_claude with timeout."""
+        prompt = "Test prompt"
+        
+        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('cmd', 30)):
+            with patch('tempfile.NamedTemporaryFile'):
+                result = prompt_builder.build_with_claude(prompt)
+        
+        assert result is not None
+        assert result['success'] is False
+        assert 'timeout' in result['error'].lower()
+    
+    def test_validate_meta_prompt(self, prompt_builder):
+        """Test validate_meta_prompt method."""
+        valid_prompt = "This is a valid prompt\nWith multiple lines"
+        
+        result = prompt_builder.validate_meta_prompt(valid_prompt)
+        assert result is True
+        
+        # Test with empty prompt
+        result = prompt_builder.validate_meta_prompt("")
+        assert result is False
+        
+        # Test with None
+        result = prompt_builder.validate_meta_prompt(None)
+        assert result is False
+    
+    def test_generate_meta_prompt(self, prompt_builder):
+        """Test generate_meta_prompt method."""
+        task_type = "issue_implementation"
+        task_data = {
+            'issue_number': 42,
+            'issue_title': 'Test Issue',
+            'issue_body': 'Test body'
+        }
+        claude_md_content = "Project context"
+        
+        result = prompt_builder.generate_meta_prompt(task_type, task_data, claude_md_content)
+        
+        assert result is not None
+        assert 'success' in result
+        assert result['success'] is True
+        assert 'prompt' in result
+    
+    def test_execute_two_stage_prompt(self, prompt_builder):
+        """Test execute_two_stage_prompt method."""
+        task_type = "issue_implementation"
+        task_data = {
+            'issue_number': 42,
+            'issue_title': 'Test Issue',
+            'issue_body': 'Test body'
+        }
+        claude_md_content = "Project context"
+        
+        # Mock the generate_meta_prompt to return a successful result
+        with patch.object(prompt_builder, 'generate_meta_prompt') as mock_generate:
+            mock_generate.return_value = {
+                'success': True,
+                'prompt': 'Generated prompt'
+            }
             
-            with patch('subprocess.run', side_effect=Exception("Review exception")):
-                with patch('pathlib.Path.unlink') as mock_unlink:
-                    with patch('src.claude_tasker.prompt_builder.logger'):
-                        result = prompt_builder.execute_claude_review(prompt)
+            # Mock build_with_claude to return success
+            with patch.object(prompt_builder, 'build_with_claude') as mock_build:
+                mock_build.return_value = {
+                    'success': True,
+                    'response': 'Execution complete'
+                }
+                
+                result = prompt_builder.execute_two_stage_prompt(
+                    task_type, task_data, claude_md_content, prompt_only=False
+                )
+        
+        assert result is not None
+        assert result['success'] is True
+    
+    def test_execute_two_stage_prompt_prompt_only(self, prompt_builder):
+        """Test execute_two_stage_prompt in prompt-only mode."""
+        task_type = "issue_implementation"
+        task_data = {
+            'issue_number': 42,
+            'issue_title': 'Test Issue',
+            'issue_body': 'Test body'
+        }
+        claude_md_content = "Project context"
+        
+        # Mock the generate_meta_prompt to return a successful result
+        with patch.object(prompt_builder, 'generate_meta_prompt') as mock_generate:
+            mock_generate.return_value = {
+                'success': True,
+                'prompt': 'Generated prompt'
+            }
             
-            # Verify cleanup was called
-            mock_unlink.assert_called_once()
-            assert result is None
+            with patch('builtins.print'):
+                result = prompt_builder.execute_two_stage_prompt(
+                    task_type, task_data, claude_md_content, prompt_only=True
+                )
+        
+        assert result is not None
+        assert result['success'] is True
+    
+    def test_execute_two_stage_prompt_meta_prompt_failure(self, prompt_builder):
+        """Test execute_two_stage_prompt when meta-prompt generation fails."""
+        task_type = "issue_implementation"
+        task_data = {
+            'issue_number': 42,
+            'issue_title': 'Test Issue',
+            'issue_body': 'Test body'
+        }
+        claude_md_content = "Project context"
+        
+        # Mock the generate_meta_prompt to return a failure
+        with patch.object(prompt_builder, 'generate_meta_prompt') as mock_generate:
+            mock_generate.return_value = {
+                'success': False,
+                'error': 'Generation failed'
+            }
+            
+            result = prompt_builder.execute_two_stage_prompt(
+                task_type, task_data, claude_md_content, prompt_only=False
+            )
+        
+        assert result is not None
+        assert result['success'] is False
+        assert 'error' in result
+    
+    def test_execute_two_stage_prompt_execution_failure(self, prompt_builder):
+        """Test execute_two_stage_prompt when execution fails."""
+        task_type = "issue_implementation"
+        task_data = {
+            'issue_number': 42,
+            'issue_title': 'Test Issue',
+            'issue_body': 'Test body'
+        }
+        claude_md_content = "Project context"
+        
+        # Mock the generate_meta_prompt to return a successful result
+        with patch.object(prompt_builder, 'generate_meta_prompt') as mock_generate:
+            mock_generate.return_value = {
+                'success': True,
+                'prompt': 'Generated prompt'
+            }
+            
+            # Mock build_with_claude to return failure
+            with patch.object(prompt_builder, 'build_with_claude') as mock_build:
+                mock_build.return_value = {
+                    'success': False,
+                    'error': 'Execution failed'
+                }
+                
+                result = prompt_builder.execute_two_stage_prompt(
+                    task_type, task_data, claude_md_content, prompt_only=False
+                )
+        
+        assert result is not None
+        assert result['success'] is False
+        assert 'error' in result

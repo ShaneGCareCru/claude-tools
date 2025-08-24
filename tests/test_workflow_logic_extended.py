@@ -20,31 +20,36 @@ class TestWorkflowLogicExtended:
         mock_workspace = Mock()
         mock_prompt_builder = Mock()
         mock_pr_generator = Mock()
+        mock_env_validator = Mock()
         
         return {
             'github_client': mock_github,
             'workspace_manager': mock_workspace,
             'prompt_builder': mock_prompt_builder,
-            'pr_body_generator': mock_pr_generator
+            'pr_body_generator': mock_pr_generator,
+            'env_validator': mock_env_validator
         }
     
     @pytest.fixture
     def workflow(self, mock_dependencies):
         """Create WorkflowLogic instance with mocked dependencies."""
-        return WorkflowLogic(
-            github_client=mock_dependencies['github_client'],
-            workspace_manager=mock_dependencies['workspace_manager'],
-            prompt_builder=mock_dependencies['prompt_builder'],
-            pr_body_generator=mock_dependencies['pr_body_generator'],
-            base_branch='main'
-        )
+        with patch('src.claude_tasker.workflow_logic.GitHubClient', return_value=mock_dependencies['github_client']), \
+             patch('src.claude_tasker.workflow_logic.WorkspaceManager', return_value=mock_dependencies['workspace_manager']), \
+             patch('src.claude_tasker.workflow_logic.PromptBuilder', return_value=mock_dependencies['prompt_builder']), \
+             patch('src.claude_tasker.workflow_logic.PRBodyGenerator', return_value=mock_dependencies['pr_body_generator']), \
+             patch('src.claude_tasker.workflow_logic.EnvironmentValidator', return_value=mock_dependencies['env_validator']), \
+             patch('src.claude_tasker.workflow_logic.Path'):
+            # Mock the _detect_default_branch and _load_claude_md methods
+            mock_dependencies['github_client'].get_default_branch.return_value = 'main'
+            workflow = WorkflowLogic(base_branch='main')
+            return workflow
     
     def test_process_issue_github_fetch_failure(self, workflow, mock_dependencies):
-        """Test process_issue when GitHub fetch fails."""
+        """Test process_single_issue when GitHub fetch fails."""
         mock_dependencies['github_client'].get_issue.return_value = None
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         
-        args = Mock(prompt_only=False, dry_run=False)
-        result = workflow.process_issue(42, args)
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is False
         assert "Failed to fetch issue" in result.message
@@ -57,17 +62,15 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False)
-        result = workflow.process_issue(42, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is False
         assert "Failed to prepare workspace" in result.message
@@ -79,18 +82,16 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = "issue-42-branch"
         mock_dependencies['prompt_builder'].build_audit_prompt.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False)
-        result = workflow.process_issue(42, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is False
         assert "Failed to generate audit prompt" in result.message
@@ -102,20 +103,18 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = "issue-42-branch"
         mock_dependencies['prompt_builder'].build_audit_prompt.return_value = "Test prompt"
         
-        args = Mock(prompt_only=True, dry_run=False)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         
         with patch('builtins.print') as mock_print:
-            result = workflow.process_issue(42, args)
+            result = workflow.process_single_issue(42, prompt_only=True)
         
         assert result.success is True
         assert "Prompt generated" in result.message
@@ -129,18 +128,16 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = "issue-42-branch"
         mock_dependencies['prompt_builder'].build_audit_prompt.return_value = "Test prompt"
         
-        args = Mock(prompt_only=False, dry_run=True)
-        result = workflow.process_issue(42, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is True
         assert "Dry run completed" in result.message
@@ -153,19 +150,17 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = "issue-42-branch"
         mock_dependencies['prompt_builder'].build_audit_prompt.return_value = "Test prompt"
         mock_dependencies['prompt_builder'].execute_claude_with_prompt.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.process_issue(42, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is False
         assert "Failed to execute Claude" in result.message
@@ -177,11 +172,9 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = "issue-42-branch"
@@ -192,8 +185,8 @@ class TestWorkflowLogicExtended:
         }
         mock_dependencies['prompt_builder'].build_implementation_prompt.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.process_issue(42, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is False
         assert "Failed to generate implementation prompt" in result.message
@@ -205,11 +198,9 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = "issue-42-branch"
@@ -222,8 +213,8 @@ class TestWorkflowLogicExtended:
             None
         ]
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.process_issue(42, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is False
         assert "Failed to execute implementation" in result.message
@@ -235,11 +226,9 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = "issue-42-branch"
@@ -251,8 +240,8 @@ class TestWorkflowLogicExtended:
         ]
         mock_dependencies['workspace_manager'].has_changes.return_value = False
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.process_issue(42, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is True
         assert "No changes detected" in result.message
@@ -265,11 +254,9 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = "issue-42-branch"
@@ -282,8 +269,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].has_changes.return_value = True
         mock_dependencies['workspace_manager'].commit_changes.return_value = False
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.process_issue(42, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is False
         assert "Failed to commit changes" in result.message
@@ -295,11 +282,9 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = "issue-42-branch"
@@ -313,8 +298,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].commit_changes.return_value = True
         mock_dependencies['workspace_manager'].push_branch.return_value = False
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.process_issue(42, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is False
         assert "Failed to push branch" in result.message
@@ -326,11 +311,9 @@ class TestWorkflowLogicExtended:
             title="Test Issue",
             body="Test body",
             labels=["bug"],
-            state="open",
-            assignee=None,
-            milestone=None,
-            created_at="2024-01-01",
-            updated_at="2024-01-01"
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
+            state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].prepare_workspace.return_value = "issue-42-branch"
@@ -348,8 +331,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['pr_body_generator'].generate_pr_body.return_value = "PR body"
         mock_dependencies['github_client'].create_pr.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.process_issue(42, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is False
         assert "Failed to create PR" in result.message
@@ -358,8 +341,8 @@ class TestWorkflowLogicExtended:
         """Test analyze_bug when prompt generation fails."""
         mock_dependencies['prompt_builder'].build_bug_analysis_prompt.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False)
-        result = workflow.analyze_bug("Something is broken", args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.analyze_bug("Something is broken", prompt_only=False)
         
         assert result.success is False
         assert "Failed to generate bug analysis prompt" in result.message
@@ -368,10 +351,10 @@ class TestWorkflowLogicExtended:
         """Test analyze_bug in prompt-only mode."""
         mock_dependencies['prompt_builder'].build_bug_analysis_prompt.return_value = "Bug prompt"
         
-        args = Mock(prompt_only=True)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         
         with patch('builtins.print') as mock_print:
-            result = workflow.analyze_bug("Something is broken", args)
+            result = workflow.analyze_bug("Something is broken", prompt_only=True)
         
         assert result.success is True
         assert "Prompt generated" in result.message
@@ -382,8 +365,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['prompt_builder'].build_bug_analysis_prompt.return_value = "Bug prompt"
         mock_dependencies['prompt_builder'].execute_claude_with_prompt.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.analyze_bug("Something is broken", args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.analyze_bug("Something is broken", prompt_only=False)
         
         assert result.success is False
         assert "Failed to execute bug analysis" in result.message
@@ -397,8 +380,8 @@ class TestWorkflowLogicExtended:
         }
         mock_dependencies['github_client'].create_issue.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.analyze_bug("Something is broken", args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.analyze_bug("Something is broken", prompt_only=False)
         
         assert result.success is False
         assert "Failed to create GitHub issue" in result.message
@@ -407,8 +390,8 @@ class TestWorkflowLogicExtended:
         """Test review_pr when GitHub fetch fails."""
         mock_dependencies['github_client'].get_pr.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False)
-        result = workflow.review_pr(123, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.review_pr(123, prompt_only=False)
         
         assert result.success is False
         assert "Failed to fetch PR" in result.message
@@ -419,8 +402,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['github_client'].get_pr.return_value = pr_data
         mock_dependencies['prompt_builder'].build_pr_review_prompt.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False)
-        result = workflow.review_pr(123, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.review_pr(123, prompt_only=False)
         
         assert result.success is False
         assert "Failed to generate PR review prompt" in result.message
@@ -431,10 +414,10 @@ class TestWorkflowLogicExtended:
         mock_dependencies['github_client'].get_pr.return_value = pr_data
         mock_dependencies['prompt_builder'].build_pr_review_prompt.return_value = "Review prompt"
         
-        args = Mock(prompt_only=True)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         
         with patch('builtins.print') as mock_print:
-            result = workflow.review_pr(123, args)
+            result = workflow.review_pr(123, prompt_only=True)
         
         assert result.success is True
         assert "Prompt generated" in result.message
@@ -447,8 +430,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['prompt_builder'].build_pr_review_prompt.return_value = "Review prompt"
         mock_dependencies['prompt_builder'].execute_claude_review.return_value = None
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.review_pr(123, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.review_pr(123, prompt_only=False)
         
         assert result.success is False
         assert "Failed to generate PR review" in result.message
@@ -464,8 +447,8 @@ class TestWorkflowLogicExtended:
         }
         mock_dependencies['github_client'].comment_on_pr.return_value = False
         
-        args = Mock(prompt_only=False, dry_run=False, interactive=False, coder='claude')
-        result = workflow.review_pr(123, args)
+        mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
+        result = workflow.review_pr(123, prompt_only=False)
         
         assert result.success is False
         assert "Failed to post review comment" in result.message
