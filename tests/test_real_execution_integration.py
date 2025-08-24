@@ -329,23 +329,35 @@ class TestExecutionModeValidation:
         
         prompt_builder = PromptBuilder()
         
-        # Test that build_with_claude receives execute_mode parameter
-        with patch.object(prompt_builder, 'build_with_claude') as mock_build:
-            mock_build.return_value = {'result': 'test'}
+        # Mock all external dependencies to prevent real LLM calls
+        with patch.object(prompt_builder, 'build_with_claude') as mock_build, \
+             patch.object(prompt_builder, 'build_with_llm') as mock_llm:
+            
+            # Mock the meta-prompt generation to succeed
+            mock_llm.return_value = {'optimized_prompt': 'test optimized prompt'}
+            # Mock the final execution to succeed
+            mock_build.return_value = {'result': 'test execution result'}
             
             # Call with prompt_only=False
-            prompt_builder.execute_two_stage_prompt(
+            result = prompt_builder.execute_two_stage_prompt(
                 task_type="test",
                 task_data={},
                 claude_md_content="# Test",
                 prompt_only=False
             )
             
-            # Verify build_with_claude was called with execute_mode=True
-            mock_build.assert_called_with(
-                mock_build.call_args[0][0],  # The prompt
-                execute_mode=True  # This parameter was missing in the original bug
-            )
+            # Verify the execution succeeded and build_with_claude was called with execute_mode=True
+            assert result['success'] is True
+            
+            # Find the call with execute_mode=True
+            execute_call = None
+            for call in mock_build.call_args_list:
+                if 'execute_mode' in call.kwargs and call.kwargs['execute_mode'] is True:
+                    execute_call = call
+                    break
+            
+            assert execute_call is not None, "build_with_claude should be called with execute_mode=True"
+            assert execute_call.kwargs['execute_mode'] is True
     
     def test_subprocess_command_construction(self):
         """Test that subprocess commands are constructed correctly for execution."""
