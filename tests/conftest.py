@@ -101,11 +101,6 @@ def mock_claude_cli():
         yield mock_run
 
 
-@pytest.fixture
-def claude_tasker_script():
-    """Return path to the claude-tasker script."""
-    return Path(__file__).parent.parent / "claude-tasker"
-
 
 @pytest.fixture
 def mock_environment_vars():
