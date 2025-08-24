@@ -77,21 +77,33 @@ class WorkflowLogic:
     
     def validate_environment(self, prompt_only: bool = False) -> Tuple[bool, str]:
         """Validate environment before execution."""
+        logger.info("Validating environment dependencies")
+        logger.debug(f"Prompt-only mode: {prompt_only}")
+        
         validation_results = self.env_validator.validate_all_dependencies(prompt_only=prompt_only)
+        
+        logger.debug(f"Validation results: {validation_results}")
         
         if not validation_results['valid']:
             report = self.env_validator.format_validation_report(validation_results)
+            logger.error(f"Environment validation failed: {report}")
             return False, report
         
+        logger.info("Environment validation passed")
         return True, "Environment validation passed"
     
     def process_single_issue(self, issue_number: int, prompt_only: bool = False,
                            project_number: Optional[int] = None) -> WorkflowResult:
         """Process a single GitHub issue using the audit-and-implement workflow."""
+        logger.info(f"Starting to process issue #{issue_number}")
+        logger.debug(f"Options: prompt_only={prompt_only}, project_number={project_number}")
+        
         try:
             # Validate environment
+            logger.debug("Decision: Validating environment before processing")
             env_valid, env_msg = self.validate_environment(prompt_only)
             if not env_valid:
+                logger.error(f"Environment validation failed for issue #{issue_number}")
                 return WorkflowResult(
                     success=False,
                     message="Environment validation failed",
@@ -99,23 +111,33 @@ class WorkflowLogic:
                 )
             
             # Fetch issue data
+            logger.info(f"Fetching issue data for #{issue_number}")
             issue_data = self.github_client.get_issue(issue_number)
             if not issue_data:
+                logger.error(f"Failed to fetch issue #{issue_number}")
                 return WorkflowResult(
                     success=False,
                     message=f"Failed to fetch issue #{issue_number}",
                     issue_number=issue_number
                 )
             
+            logger.debug(f"Issue #{issue_number}: {issue_data.title}")
+            logger.debug(f"Issue state: {issue_data.state}")
+            logger.debug(f"Issue labels: {issue_data.labels}")
+            
             # Validate that we're on the correct branch for this issue
+            logger.debug("Decision: Validating branch matches issue number")
             branch_valid, branch_msg = self.workspace_manager.validate_branch_for_issue(issue_number)
             if not branch_valid:
                 logger.warning(f"Branch validation failed: {branch_msg}")
+                logger.debug(f"Decision: Continuing despite branch mismatch (warning only)")
                 print(f"⚠️  Warning: {branch_msg}")
                 # Don't fail hard, but warn the user about the mismatch
             
             # Check if issue is already closed
             if issue_data.state.lower() == 'closed':
+                logger.info(f"Issue #{issue_number} is already closed")
+                logger.debug("Decision: Skipping closed issue")
                 return WorkflowResult(
                     success=True,
                     message=f"Issue #{issue_number} already closed",
@@ -130,23 +152,30 @@ class WorkflowLogic:
                     project_context['project_info'] = project_info
             
             # Perform workspace hygiene
+            logger.debug("Decision: Performing workspace hygiene before processing")
             if not self.workspace_manager.workspace_hygiene():
+                logger.error("Workspace hygiene failed or was cancelled")
                 return WorkflowResult(
                     success=False,
                     message="Workspace hygiene failed or cancelled by user",
                     issue_number=issue_number
                 )
+            logger.debug("Workspace hygiene completed successfully")
             
             # Create timestamped branch
+            logger.info(f"Creating timestamped branch for issue #{issue_number}")
+            logger.debug(f"Base branch: {self.base_branch}")
             branch_created, branch_name = self.workspace_manager.create_timestamped_branch(
                 issue_number, self.base_branch
             )
             if not branch_created:
+                logger.error(f"Failed to create branch: {branch_name}")
                 return WorkflowResult(
                     success=False,
                     message=f"Failed to create branch: {branch_name}",
                     issue_number=issue_number
                 )
+            logger.info(f"Created branch: {branch_name}")
             
             # Generate and execute prompt using two-stage execution
             task_data = {
@@ -175,6 +204,8 @@ class WorkflowLogic:
             
             # If prompt-only mode, return success
             if prompt_only:
+                logger.info(f"Prompt-only mode: Prompt generated for issue #{issue_number}")
+                logger.debug("Decision: Skipping execution due to prompt-only mode")
                 return WorkflowResult(
                     success=True,
                     message=f"Prompt generated for issue #{issue_number}",
@@ -183,9 +214,10 @@ class WorkflowLogic:
                 )
             
             # Check if there are changes to commit
-            logger.debug("Checking for git changes after Claude execution")
+            logger.info("Checking for git changes after Claude execution")
             has_changes = self.workspace_manager.has_changes_to_commit()
             logger.debug(f"Git has changes: {has_changes}")
+            logger.debug(f"Decision: {('Creating PR' if has_changes else 'No changes to commit')}")
             
             if has_changes:
                 # Commit changes
@@ -257,6 +289,9 @@ The implementation has been completed and is ready for review.
                     )
             else:
                 # No changes made - issue might already be complete
+                logger.info(f"No changes made for issue #{issue_number}")
+                logger.debug("Decision: Issue appears to be already complete or requires no code changes")
+                
                 # Comment on issue explaining the situation
                 no_changes_comment = """## 🤖 Automated Analysis Complete
 
@@ -279,6 +314,8 @@ The issue has been reviewed and no further action is needed at this time.
                 )
         
         except Exception as e:
+            logger.error(f"Unexpected error processing issue #{issue_number}: {str(e)}")
+            logger.debug("Exception details:", exc_info=True)
             return WorkflowResult(
                 success=False,
                 message=f"Unexpected error processing issue #{issue_number}",

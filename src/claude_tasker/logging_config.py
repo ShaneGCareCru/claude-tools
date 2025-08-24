@@ -175,7 +175,10 @@ def setup_logging(
     backup_count: int = 5,
     log_dir: Optional[str] = None,
     sanitize_logs: bool = False,
-    file_permissions: int = 0o600
+    file_permissions: int = 0o600,
+    log_prompts: bool = None,
+    log_responses: bool = None,
+    truncate_length: int = None
 ) -> Dict[str, Any]:
     """
     Setup comprehensive logging configuration for the application.
@@ -191,6 +194,9 @@ def setup_logging(
         log_dir: Directory for log files (default: 'logs')
         sanitize_logs: Enable sanitization of sensitive data in logs
         file_permissions: Unix file permissions for log files (default: 0o600)
+        log_prompts: Enable full prompt logging in DEBUG mode (default: True)
+        log_responses: Enable full response logging in DEBUG mode (default: True)
+        truncate_length: Maximum length for logged content before truncation (default: 10000)
         
     Returns:
         Dict containing logging configuration details
@@ -216,6 +222,14 @@ def setup_logging(
     enable_colors = os.getenv('CLAUDE_LOG_COLORS', str(enable_colors)).lower() == 'true'
     enable_json = os.getenv('CLAUDE_LOG_JSON', str(enable_json)).lower() == 'true'
     sanitize_logs = os.getenv('CLAUDE_LOG_SANITIZE', str(sanitize_logs)).lower() == 'true'
+    
+    # Debug logging options
+    if log_prompts is None:
+        log_prompts = os.getenv('CLAUDE_LOG_PROMPTS', 'true').lower() == 'true'
+    if log_responses is None:
+        log_responses = os.getenv('CLAUDE_LOG_RESPONSES', 'true').lower() == 'true'
+    if truncate_length is None:
+        truncate_length = int(os.getenv('CLAUDE_LOG_TRUNCATE_LENGTH', '10000'))
     
     # Validate numeric parameters
     try:
@@ -303,6 +317,11 @@ def setup_logging(
     logging.getLogger('urllib3').setLevel(logging.WARNING)
     logging.getLogger('requests').setLevel(logging.WARNING)
     
+    # Store debug logging options globally for use by other modules
+    os.environ['CLAUDE_LOG_PROMPTS'] = str(log_prompts).lower()
+    os.environ['CLAUDE_LOG_RESPONSES'] = str(log_responses).lower()
+    os.environ['CLAUDE_LOG_TRUNCATE_LENGTH'] = str(truncate_length)
+    
     config_info = {
         'log_level': log_level,
         'log_file': log_file,
@@ -314,7 +333,10 @@ def setup_logging(
         'backup_count': backup_count,
         'log_dir': log_dir,
         'file_permissions': oct(file_permissions),
-        'handlers': len(root_logger.handlers)
+        'handlers': len(root_logger.handlers),
+        'log_prompts': log_prompts,
+        'log_responses': log_responses,
+        'truncate_length': truncate_length
     }
     
     # Log initial configuration
@@ -408,6 +430,34 @@ def log_exception(logger: logging.Logger, message: str = "An error occurred"):
                 raise
         return wrapper
     return decorator
+
+
+def get_debug_config() -> Dict[str, Any]:
+    """Get current debug logging configuration.
+    
+    Returns:
+        Dict with debug logging settings
+    """
+    return {
+        'log_prompts': os.getenv('CLAUDE_LOG_PROMPTS', 'true').lower() == 'true',
+        'log_responses': os.getenv('CLAUDE_LOG_RESPONSES', 'true').lower() == 'true',
+        'truncate_length': int(os.getenv('CLAUDE_LOG_TRUNCATE_LENGTH', '10000')),
+        'log_level': os.getenv('CLAUDE_LOG_LEVEL', 'INFO')
+    }
+
+
+def should_log_full_content() -> bool:
+    """Check if full content logging is enabled.
+    
+    Returns:
+        True if DEBUG level and full content logging is enabled
+    """
+    logger = logging.getLogger()
+    if not logger.isEnabledFor(logging.DEBUG):
+        return False
+    
+    config = get_debug_config()
+    return config['log_prompts'] or config['log_responses']
 
 
 # Initialize logging on module import if running as main application
