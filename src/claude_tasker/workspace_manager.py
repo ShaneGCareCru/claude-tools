@@ -353,3 +353,39 @@ class WorkspaceManager:
         """Check if branch exists on remote."""
         result = self._run_git_command(['show-ref', '--verify', '--quiet', f'refs/remotes/origin/{branch_name}'])
         return result.returncode == 0
+    
+    def has_changes(self) -> bool:
+        """Check if there are any uncommitted changes in the workspace."""
+        result = self._run_git_command(['status', '--porcelain'])
+        if result.returncode != 0:
+            return False
+        return bool(result.stdout.strip())
+    
+    def cleanup_old_branches(self, days: int = 30) -> bool:
+        """Clean up old local branches that have been merged."""
+        try:
+            # Get list of merged branches
+            result = self._run_git_command(['branch', '--merged'])
+            if result.returncode != 0:
+                return False
+            
+            branches = result.stdout.strip().split('\n')
+            cleaned_count = 0
+            
+            for branch in branches:
+                branch = branch.strip().replace('*', '').strip()
+                # Skip main/master branches
+                if branch in ['main', 'master', 'develop']:
+                    continue
+                
+                # Delete the branch
+                result = self._run_git_command(['branch', '-d', branch])
+                if result.returncode == 0:
+                    cleaned_count += 1
+                    logger.info(f"Deleted merged branch: {branch}")
+            
+            logger.info(f"Cleaned up {cleaned_count} old branches")
+            return True
+        except Exception as e:
+            logger.error(f"Error cleaning up branches: {e}")
+            return False

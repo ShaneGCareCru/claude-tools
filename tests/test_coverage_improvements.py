@@ -105,12 +105,19 @@ class TestWorkflowLogicCoverageImprovements:
             state="open"
         )
         mock_github_instance.get_project_info.return_value = {"name": "Project X"}
+        mock_github_instance.create_pr.return_value = "https://github.com/test/repo/pull/123"
+        mock_github_instance.comment_on_issue.return_value = True
         mock_github.return_value = mock_github_instance
         
         mock_workspace_instance = Mock()
+        mock_workspace_instance.validate_branch_for_issue.return_value = (True, "Branch validation passed")
         mock_workspace_instance.workspace_hygiene.return_value = True
         mock_workspace_instance.create_timestamped_branch.return_value = (True, "issue-42-12345")
         mock_workspace_instance.has_changes_to_commit.return_value = False
+        mock_workspace_instance.commit_changes.return_value = True
+        mock_workspace_instance.push_branch.return_value = True
+        mock_workspace_instance.get_git_diff.return_value = "diff content"
+        mock_workspace_instance.get_commit_log.return_value = "commit log"
         mock_workspace.return_value = mock_workspace_instance
         
         mock_prompt_instance = Mock()
@@ -120,7 +127,9 @@ class TestWorkflowLogicCoverageImprovements:
         }
         mock_prompt.return_value = mock_prompt_instance
         
-        mock_pr_gen.return_value = Mock()
+        mock_pr_gen_instance = Mock()
+        mock_pr_gen_instance.generate_pr_body.return_value = "PR body content"
+        mock_pr_gen.return_value = mock_pr_gen_instance
         
         mock_env_instance = Mock()
         mock_env_instance.validate_all_dependencies.return_value = {'valid': True}
@@ -146,7 +155,7 @@ class TestPromptBuilderCoverageImprovements:
         
         assert result is not None
         assert result['success'] is False
-        assert 'timeout' in result['error'].lower()
+        assert 'timed out' in result['error'].lower()
     
     def test_execute_llm_tool_generic_exception(self):
         """Test _execute_llm_tool with generic exception."""

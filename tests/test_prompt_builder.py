@@ -97,7 +97,9 @@ class TestPromptBuilder:
                 execute_mode=True
             )
             
-            assert result is None
+            assert result is not None
+            assert result['success'] is False
+            assert 'timed out' in result['error'].lower()
     
     def test_execute_llm_tool_json_decode_error(self):
         """Test handling of invalid JSON responses."""

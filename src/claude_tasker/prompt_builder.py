@@ -226,14 +226,25 @@ Keep the response focused and practical. Format as markdown."""
             else:
                 logger.error(f"Command failed with return code {result.returncode}")
                 logger.error(f"stderr: {result.stderr[:500]}")
-                return None
+                return {
+                    'success': False,
+                    'error': f'Command failed with return code {result.returncode}',
+                    'stderr': result.stderr,
+                    'stdout': result.stdout
+                }
                 
         except subprocess.TimeoutExpired:
             logger.error("Command timed out")
-            return None
+            return {
+                'success': False,
+                'error': 'Command timed out'
+            }
         except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
             logger.error(f"Error: {e}")
-            return None
+            return {
+                'success': False,
+                'error': f'Unexpected error: {str(e)}'
+            }
     
     def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
         """Build prompt using LLM CLI tool."""
@@ -255,6 +266,10 @@ Keep the response focused and practical. Format as markdown."""
     
     def validate_meta_prompt(self, meta_prompt: str) -> bool:
         """Validate meta-prompt to prevent infinite loops."""
+        # Check for None or empty
+        if not meta_prompt:
+            return False
+        
         # Check for minimum content requirements
         if len(meta_prompt.strip()) < 100:
             return False
@@ -383,7 +398,7 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                 # Run Claude in headless mode to generate the review
                 cmd = ['claude', '-p', prompt_file, '--permission-mode', 'bypassPermissions']
                 
-                logger.debug(f"Running command: {' '.join(cmd)}")
+                logger.debug(f"Running command: {cmd}")
                 logger.debug(f"Prompt length: {len(prompt)} chars")
                 
                 # Execute with longer timeout for review generation
