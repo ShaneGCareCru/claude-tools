@@ -272,9 +272,20 @@ class PRBodyGenerator:
         parts = [
             "## Summary",
             f"This PR addresses issue #{context['issue']['number']}: {context['issue']['title']}",
+        ]
+        
+        # Add issue body if available and include truncation indicator
+        if context['issue'].get('body'):
+            parts.extend([
+                "",
+                "## Issue Description",
+                context['issue']['body']  # This will include "..." if truncated
+            ])
+        
+        parts.extend([
             "",
             "## Changes",
-        ]
+        ])
         
         stats = context.get('stats', {})
         if stats:
@@ -416,7 +427,7 @@ class PRBodyGenerator:
     def _generate_implementation_approach(self, commit_log: str) -> str:
         """Generate implementation approach section from commit log."""
         if not commit_log or not commit_log.strip():
-            return "Implementation approach not documented in commit history."
+            return ""
         
         lines = [line.strip() for line in commit_log.strip().split('\n') if line.strip()]
         
@@ -434,6 +445,7 @@ class PRBodyGenerator:
                     filtered_lines.append(f"• {line}")
         
         if not filtered_lines:
-            return "Implementation approach not documented in commit history."
+            return ""
         
-        return '\n'.join(filtered_lines)
+        # Include section header when there are commits
+        return "Implementation Approach:\n" + '\n'.join(filtered_lines)
