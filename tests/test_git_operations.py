@@ -542,13 +542,9 @@ class TestWorkspaceManager:
         workspace = WorkspaceManager()
         
         def side_effect(cmd):
-            if cmd == ['diff', '--quiet']:
-                return Mock(returncode=0)  # No unstaged changes
-            elif cmd == ['diff', '--cached', '--quiet']:
-                return Mock(returncode=0)  # No staged changes
-            elif cmd == ['ls-files', '--others', '--exclude-standard']:
-                return Mock(returncode=0, stdout="")  # No untracked files
-            return Mock(returncode=0)
+            if cmd == ['status', '--porcelain']:
+                return Mock(returncode=0, stdout="", stderr="")  # Clean workspace
+            return Mock(returncode=0, stdout="", stderr="")
         
         with patch.object(workspace, '_run_git_command', side_effect=side_effect), \
              patch('builtins.print'):  # Suppress debug prints
