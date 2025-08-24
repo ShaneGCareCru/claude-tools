@@ -230,10 +230,16 @@ Keep the response focused and practical. Format as markdown."""
                 
         except subprocess.TimeoutExpired:
             logger.error("Command timed out")
-            return None
+            return {
+                'success': False,
+                'error': 'Command timed out'
+            }
         except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
             logger.error(f"Error: {e}")
-            return None
+            return {
+                'success': False,
+                'error': f'Unexpected error: {str(e)}'
+            }
     
     def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
         """Build prompt using LLM CLI tool."""
