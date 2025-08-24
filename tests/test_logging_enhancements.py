@@ -285,21 +285,24 @@ class TestWorkflowLogicLogging:
         with patch.object(workflow_logic, 'validate_environment') as mock_env:
             mock_env.return_value = (True, "OK")
             
-            with patch.object(workflow_logic.github_client, 'get_issue') as mock_get_issue:
-                # Test closed issue decision
-                mock_get_issue.return_value = Mock(
-                    number=123,
-                    title="Test Issue", 
-                    body="Description",
-                    state="closed",
-                    labels=[]
-                )
+            with patch.object(workflow_logic.workspace_manager, 'validate_branch_for_issue') as mock_validate:
+                mock_validate.return_value = (True, "Branch is valid")
                 
-                with caplog.at_level(logging.INFO):
-                    result = workflow_logic.process_single_issue(123)
+                with patch.object(workflow_logic.github_client, 'get_issue') as mock_get_issue:
+                    # Test closed issue decision
+                    mock_get_issue.return_value = Mock(
+                        number=123,
+                        title="Test Issue", 
+                        body="Description",
+                        state="closed",
+                        labels=[]
+                    )
                     
-                    assert "Issue #123 is already closed" in caplog.text
-                    assert result.message == "Issue #123 already closed"
+                    with caplog.at_level(logging.INFO):
+                        result = workflow_logic.process_single_issue(123)
+                        
+                        assert "Issue #123 is already closed" in caplog.text
+                        assert result.message == "Issue #123 already closed"
 
 
 class TestResponseProcessingLogging:
