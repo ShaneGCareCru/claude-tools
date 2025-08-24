@@ -136,7 +136,7 @@ class TestPRBodyGeneratorImplementation:
         
         assert "## Summary" in result
         assert "Test Issue" in result
-        assert "Test description" not in result  # Body not included in fallback
+        assert "Test description" in result  # Body included in fallback for context
         assert "## Changes" in result
         assert "## Testing" in result
     
