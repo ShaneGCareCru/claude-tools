@@ -67,13 +67,14 @@ class TestWorkflowLogicExtended:
             state="open"
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
-        mock_dependencies['workspace_manager'].prepare_workspace.return_value = None
+        mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Branch validation passed")
+        mock_dependencies['workspace_manager'].workspace_hygiene.return_value = False  # Simulate failure
         
         mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         result = workflow.process_single_issue(42, prompt_only=False)
         
         assert result.success is False
-        assert "Failed to prepare workspace" in result.message
+        assert "Workspace hygiene failed" in result.message
     
     def test_process_issue_prompt_generation_failure(self, workflow, mock_dependencies):
         """Test process_issue when prompt generation fails."""
