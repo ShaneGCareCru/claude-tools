@@ -337,6 +337,18 @@ The issue has been reviewed and no further action is needed at this time.
                 pr_data, pr_diff, self.claude_md_content
             )
             
+            # If prompt-only, just display the prompt and return
+            if prompt_only:
+                print(f"\n{'='*60}")
+                print(f"REVIEW PROMPT FOR PR #{pr_number}")
+                print(f"{'='*60}")
+                print(review_prompt)
+                print(f"{'='*60}")
+                return WorkflowResult(
+                    success=True,
+                    message=f"Review prompt generated for PR #{pr_number}"
+                )
+            
             # Execute review (using claude directly for reviews with review_mode=True)
             logger.debug(f"Generating review for PR #{pr_number}...")
             review_result = self.prompt_builder.build_with_claude(review_prompt, review_mode=True)
@@ -349,6 +361,17 @@ The issue has been reviewed and no further action is needed at this time.
                     message=f"Failed to generate review for PR #{pr_number} - no result returned"
                 )
             
+            # Check if the result indicates a failure
+            if not review_result.get('success', True):
+                error_msg = review_result.get('error', 'Unknown error')
+                logger.error(f"Review generation failed for PR #{pr_number}: {error_msg}")
+                print(f"[ERROR] Review generation failed for PR #{pr_number}: {error_msg}")
+                return WorkflowResult(
+                    success=False,
+                    message=f"Failed to generate review for PR #{pr_number}: {error_msg}",
+                    error_details=error_msg
+                )
+            
             if not review_result.get('response'):
                 logger.error(f"Review result missing 'response' field for PR #{pr_number}")
                 logger.debug(f"Review result keys: {review_result.keys()}")
@@ -359,45 +382,38 @@ The issue has been reviewed and no further action is needed at this time.
                     message=f"Failed to generate review for PR #{pr_number} - no response content"
                 )
             
-            # If not prompt-only, post review comment
-            if not prompt_only:
-                # Get the actual review content
-                review_content = review_result.get('response', 'Review completed')
-                logger.debug(f"Review content length: {len(review_content)} chars")
-                logger.debug(f"Review content preview: {review_content[:200]}...")
-                
-                # Only add wrapper if there's actual content
-                if review_content and review_content != 'Review completed':
-                    review_comment = f"""## 🤖 Automated Code Review
+            # Get the actual review content
+            review_content = review_result.get('response', 'Review completed')
+            logger.debug(f"Review content length: {len(review_content)} chars")
+            logger.debug(f"Review content preview: {review_content[:200]}...")
+            
+            # Only add wrapper if there's actual content
+            if review_content and review_content != 'Review completed':
+                review_comment = f"""## 🤖 Automated Code Review
 
 {review_content}
 
 ---
 🤖 Generated via automated review with [Claude Code](https://claude.ai/code)"""
-                else:
-                    # Fallback if no content
-                    review_comment = f"""## 🤖 Automated Code Review
+            else:
+                # Fallback if no content
+                review_comment = f"""## 🤖 Automated Code Review
 
 Unable to generate detailed review. Please review the PR manually.
 
 ---
 🤖 Generated via automated review with [Claude Code](https://claude.ai/code)"""
-                
-                logger.debug(f"Posting review comment to PR #{pr_number}...")
-                if self.github_client.comment_on_pr(pr_number, review_comment):
-                    return WorkflowResult(
-                        success=True,
-                        message=f"PR #{pr_number} reviewed successfully"
-                    )
-                else:
-                    return WorkflowResult(
-                        success=False,
-                        message=f"Failed to post review comment on PR #{pr_number}"
-                    )
-            else:
+            
+            logger.debug(f"Posting review comment to PR #{pr_number}...")
+            if self.github_client.comment_on_pr(pr_number, review_comment):
                 return WorkflowResult(
                     success=True,
-                    message=f"Review generated for PR #{pr_number}"
+                    message=f"PR #{pr_number} reviewed successfully"
+                )
+            else:
+                return WorkflowResult(
+                    success=False,
+                    message=f"Failed to post review comment on PR #{pr_number}"
                 )
         
         except Exception as e:

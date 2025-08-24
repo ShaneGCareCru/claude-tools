@@ -408,14 +408,29 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                 else:
                     logger.error(f"Claude review failed with return code {result.returncode}")
                     logger.error(f"stderr: {result.stderr[:500]}")
-                    return None
+                    logger.error(f"stdout: {result.stdout[:500]}")
+                    # Return a failure result instead of None
+                    return {
+                        'success': False,
+                        'error': f"Claude execution failed with return code {result.returncode}",
+                        'stderr': result.stderr,
+                        'stdout': result.stdout
+                    }
             finally:
                 # Clean up temp file
                 Path(prompt_file).unlink(missing_ok=True)
                 
         except subprocess.TimeoutExpired:
             logger.error("Claude review command timed out")
-            return None
+            return {
+                'success': False,
+                'error': "Claude review command timed out after 20 minutes",
+                'timeout': True
+            }
         except Exception as e:
             logger.error(f"Error executing Claude review: {e}")
-            return None
+            return {
+                'success': False,
+                'error': f"Unexpected error executing Claude review: {str(e)}",
+                'exception': str(e)
+            }

@@ -6,6 +6,10 @@ import time
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
+from src.claude_tasker.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class IssueData:
@@ -178,7 +182,13 @@ class GitHubClient:
         cmd = ['pr', 'comment', str(pr_number), '--body', comment]
         
         result = self._run_gh_command(cmd)
-        return result.returncode == 0
+        if result.returncode != 0:
+            logger.error(f"Failed to comment on PR #{pr_number}. Return code: {result.returncode}")
+            logger.error(f"stderr: {result.stderr}")
+            logger.error(f"stdout: {result.stdout}")
+            logger.debug(f"Comment length: {len(comment)} chars")
+            return False
+        return True
     
     def create_pr(self, title: str, body: str, head: str, base: str = "main") -> Optional[str]:
         """Create a new PR and return its URL."""
