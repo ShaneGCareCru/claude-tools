@@ -154,7 +154,21 @@ class TestPromptBuilderExtended:
     
     def test_validate_meta_prompt(self, prompt_builder):
         """Test validate_meta_prompt method."""
-        valid_prompt = "This is a valid prompt\nWith multiple lines"
+        valid_prompt = """This is a comprehensive prompt for implementation.
+        
+        # DECONSTRUCT
+        Analyzing the requirements and current codebase state to understand what needs to be built.
+        
+        # DIAGNOSE
+        Identifying gaps between requirements and current implementation.
+        
+        # DEVELOP
+        Planning the implementation approach and specifying how to fill identified gaps.
+        
+        # DELIVER
+        Implementing the missing pieces of functionality with proper testing.
+        
+        This prompt contains enough content and all required sections for validation."""
         
         result = prompt_builder.validate_meta_prompt(valid_prompt)
         assert result is True

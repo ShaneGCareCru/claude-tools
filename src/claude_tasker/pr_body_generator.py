@@ -5,6 +5,9 @@ import tempfile
 from typing import Optional, Dict, Any
 from pathlib import Path
 from .github_client import IssueData
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class PRBodyGenerator:
@@ -41,7 +44,7 @@ class PRBodyGenerator:
             'issue': {
                 'number': issue_data.number,
                 'title': issue_data.title,
-                'body': issue_data.body[:1000],  # Truncate if too long
+                'body': issue_data.body[:1000] + ('...' if len(issue_data.body) > 1000 else ''),  # Truncate if too long
                 'labels': issue_data.labels,
                 'url': issue_data.url,
                 'assignee': issue_data.assignee,
@@ -242,22 +245,27 @@ class PRBodyGenerator:
     def generate_pr_body(self, issue_data: IssueData, git_diff: str, branch_name: str,
                         commit_log: str, repo_path: str = ".") -> str:
         """Generate complete PR body with template detection and context aggregation."""
-        # Detect template
-        template = self.detect_templates(repo_path)
+        try:
+            # Detect template
+            template = self.detect_templates(repo_path)
+            
+            # Aggregate context
+            context = self.aggregate_context(issue_data, git_diff, branch_name, commit_log)
+            
+            # Try LLM first, fallback to Claude
+            pr_body = self.generate_with_llm(context, template)
+            if not pr_body:
+                pr_body = self.generate_with_claude(context, template)
+            
+            # If both fail, create a basic PR body
+            if not pr_body:
+                pr_body = self._create_fallback_pr_body(context, template)
+            
+            return pr_body
         
-        # Aggregate context
-        context = self.aggregate_context(issue_data, git_diff, branch_name, commit_log)
-        
-        # Try LLM first, fallback to Claude
-        pr_body = self.generate_with_llm(context, template)
-        if not pr_body:
-            pr_body = self.generate_with_claude(context, template)
-        
-        # If both fail, create a basic PR body
-        if not pr_body:
-            pr_body = self._create_fallback_pr_body(context, template)
-        
-        return pr_body
+        except Exception as e:
+            logger.error(f"Failed to generate PR body: {e}")
+            return f"Failed to generate PR body: {str(e)}"
     
     def _create_fallback_pr_body(self, context: Dict[str, Any], template: Optional[str] = None) -> str:
         """Create a basic PR body when AI generation fails."""
@@ -369,3 +377,63 @@ class PRBodyGenerator:
                 checklist_items.append(f"- [ ] Test {config_file} changes")
             
         return '\n'.join(checklist_items) if checklist_items else "- [ ] Run existing tests\n- [ ] Verify no regressions"
+    
+    def _generate_changes_section(self, git_diff: str) -> str:
+        """Generate changes section based on git diff."""
+        if not git_diff or not git_diff.strip():
+            return "No file changes detected"
+        
+        diff_summary = self._summarize_diff(git_diff)
+        changes = []
+        
+        if diff_summary.get('files'):
+            changes.append(f"Files modified: {', '.join(diff_summary['files'])}")
+        
+        if diff_summary.get('additions', 0) > 0:
+            changes.append(f"{diff_summary['additions']} additions")
+        
+        if diff_summary.get('deletions', 0) > 0:
+            changes.append(f"{diff_summary['deletions']} deletions")
+        
+        return " • ".join(changes) if changes else "File changes detected"
+    
+    def _extract_files_from_diff(self, git_diff: str) -> list:
+        """Extract file paths from git diff."""
+        if not git_diff:
+            return []
+        
+        files = []
+        for line in git_diff.split('\n'):
+            line = line.strip()
+            if line.startswith('diff --git'):
+                parts = line.split(' ')
+                if len(parts) >= 4:
+                    file_path = parts[3][2:]  # Remove 'b/' prefix
+                    files.append(file_path)
+        
+        return files
+    
+    def _generate_implementation_approach(self, commit_log: str) -> str:
+        """Generate implementation approach section from commit log."""
+        if not commit_log or not commit_log.strip():
+            return "Implementation approach not documented in commit history."
+        
+        lines = [line.strip() for line in commit_log.strip().split('\n') if line.strip()]
+        
+        # Filter out automated commits
+        filtered_lines = []
+        automated_keywords = ['automated', 'auto-generated', 'bot:', 'dependabot', 'github-actions']
+        
+        for line in lines:
+            if not any(keyword in line.lower() for keyword in automated_keywords):
+                # Clean up commit hash prefixes
+                if ' ' in line:
+                    commit_msg = ' '.join(line.split(' ')[1:])  # Remove hash prefix
+                    filtered_lines.append(f"• {commit_msg}")
+                else:
+                    filtered_lines.append(f"• {line}")
+        
+        if not filtered_lines:
+            return "Implementation approach not documented in commit history."
+        
+        return '\n'.join(filtered_lines)

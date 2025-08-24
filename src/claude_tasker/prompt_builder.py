@@ -266,6 +266,10 @@ Keep the response focused and practical. Format as markdown."""
     
     def validate_meta_prompt(self, meta_prompt: str) -> bool:
         """Validate meta-prompt to prevent infinite loops."""
+        # Check for None or empty
+        if not meta_prompt:
+            return False
+        
         # Check for minimum content requirements
         if len(meta_prompt.strip()) < 100:
             return False
