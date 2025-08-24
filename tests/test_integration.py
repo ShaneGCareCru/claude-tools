@@ -96,19 +96,20 @@ class TestIntegration:
             mock_review_prompt.return_value = "Generated PR review prompt"
             mock_build.return_value = {'response': 'Comprehensive review completed'}
             
-            # Execute PR review workflow
+            # Execute PR review workflow in prompt_only mode
             result = workflow.review_pr(329, prompt_only=True)
             
             # Verify successful completion
             assert result.success is True
             assert "generated" in result.message.lower()
             
-            # Verify all components were called
+            # Verify all components were called except build_with_claude (since prompt_only=True)
             mock_env.assert_called_once()
             mock_get_pr.assert_called_once_with(329)
             mock_get_diff.assert_called_once_with(329)
             mock_review_prompt.assert_called_once()
-            mock_build.assert_called_once()
+            # build_with_claude should NOT be called in prompt_only mode
+            mock_build.assert_not_called()
     
     def test_bug_analysis_workflow(self):
         """Test bug analysis workflow."""

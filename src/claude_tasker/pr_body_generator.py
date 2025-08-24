@@ -175,7 +175,7 @@ class PRBodyGenerator:
             "\n## Issue Context",
             f"Issue #{context['issue']['number']}: {context['issue']['title']}",
             f"Issue Body: {context['issue']['body']}",
-            f"Issue Labels: {', '.join(context['issue']['labels']) if context['issue']['labels'] else 'None'}",
+            f"Issue Labels: {self._format_labels(context['issue']['labels'])}",
         ]
         
         if context['changes']['diff_summary']:
@@ -276,7 +276,27 @@ class PRBodyGenerator:
             "",
             "## Related Issue",
             f"Fixes #{context['issue']['number']}",
-            "",
+            ""
+        ])
+        
+        # Add labels section
+        if context['issue'].get('labels'):
+            parts.extend([
+                "## Labels",
+                f"Associated labels: {', '.join(context['issue']['labels'])}",
+                ""
+            ])
+        
+        # Add assignee and milestone if present
+        if context['issue'].get('assignee'):
+            parts.append(f"**Assignee:** {context['issue']['assignee']}")
+        if context['issue'].get('milestone'):
+            parts.append(f"**Milestone:** {context['issue']['milestone']}")
+            
+        if context['issue'].get('assignee') or context['issue'].get('milestone'):
+            parts.append("")
+        
+        parts.extend([
             "## Testing",
             "- [ ] Manual testing completed",
             "- [ ] Automated tests pass",
@@ -291,3 +311,32 @@ class PRBodyGenerator:
         if not labels:
             return "None"
         return ", ".join(f"`{label}`" for label in labels)
+    
+    def _generate_test_checklist(self, git_diff):
+        """Generate test checklist based on changes."""
+        if not git_diff:
+            return [
+                "- [ ] Manual testing completed",
+                "- [ ] Automated tests pass"
+            ]
+        
+        checklist = []
+        
+        # Check if test files were modified
+        if "test_" in git_diff or "/tests/" in git_diff:
+            checklist.append("- [ ] New tests added for new functionality")
+            checklist.append("- [ ] All existing tests still pass")
+        else:
+            checklist.append("- [ ] Tests added/updated for changes")
+        
+        # Check if source files were modified
+        if "src/" in git_diff or ".py" in git_diff:
+            checklist.append("- [ ] Code follows project style guidelines")
+            checklist.append("- [ ] Documentation updated if needed")
+        
+        checklist.extend([
+            "- [ ] Manual testing completed", 
+            "- [ ] Automated tests pass"
+        ])
+        
+        return checklist
