@@ -8,11 +8,18 @@ import logging.handlers
 import os
 import sys
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Pattern
+from typing import Optional, Dict, Any, List, Pattern, Tuple
 import json
 import functools
+
+
+# Constants for configuration defaults
+DEFAULT_TRUNCATE_LENGTH = 10000
+DEFAULT_MAX_BYTES = 10485760  # 10MB
+DEFAULT_BACKUP_COUNT = 5
+DEFAULT_FILE_PERMISSIONS = 0o600
 
 
 class SensitiveDataFilter:
@@ -25,6 +32,12 @@ class SensitiveDataFilter:
         (r'api[_-]?key["\']?\s*[:=]\s*["\']?[^\s"\',}]+', 'api_key=***REDACTED***'),
         (r'secret["\']?\s*[:=]\s*["\']?[^\s"\',}]+', 'secret=***REDACTED***'),
         (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '***EMAIL***'),
+        # Additional API key patterns
+        (r'sk-[a-zA-Z0-9]{48}', '***OPENAI_KEY***'),  # OpenAI
+        (r'xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}', '***SLACK_TOKEN***'),  # Slack
+        (r'ghp_[a-zA-Z0-9]{36}', '***GITHUB_TOKEN***'),  # GitHub Personal Access Token
+        (r'ghs_[a-zA-Z0-9]{36}', '***GITHUB_SECRET***'),  # GitHub Secret
+        (r'Bearer\s+[a-zA-Z0-9\-\._~\+\/]+', 'Bearer ***TOKEN***'),  # Bearer tokens
     ]
     
     def __init__(self, patterns: Optional[List[tuple]] = None):
@@ -58,7 +71,7 @@ class StructuredFormatter(logging.Formatter):
             message = self.filter.filter(message)
         
         log_obj = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'level': record.levelname,
             'logger': record.name,
             'message': message,
@@ -171,11 +184,11 @@ def setup_logging(
     log_format: Optional[str] = None,
     enable_colors: bool = True,
     enable_json: bool = False,
-    max_bytes: int = 10485760,  # 10MB
-    backup_count: int = 5,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    backup_count: int = DEFAULT_BACKUP_COUNT,
     log_dir: Optional[str] = None,
     sanitize_logs: bool = False,
-    file_permissions: int = 0o600,
+    file_permissions: int = DEFAULT_FILE_PERMISSIONS,
     log_prompts: bool = None,
     log_responses: bool = None,
     truncate_length: int = None
@@ -229,7 +242,7 @@ def setup_logging(
     if log_responses is None:
         log_responses = os.getenv('CLAUDE_LOG_RESPONSES', 'true').lower() == 'true'
     if truncate_length is None:
-        truncate_length = int(os.getenv('CLAUDE_LOG_TRUNCATE_LENGTH', '10000'))
+        truncate_length = int(os.getenv('CLAUDE_LOG_TRUNCATE_LENGTH', str(DEFAULT_TRUNCATE_LENGTH)))
     
     # Validate numeric parameters
     try:
@@ -285,30 +298,37 @@ def setup_logging(
             # Validate log file path
             log_file = validate_path(log_file, 'file')
             
-            # Create log directory if needed
-            if not os.path.isabs(log_file):
-                Path(log_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
-                log_file = os.path.join(log_dir, log_file)
-            else:
-                log_dir_path = Path(os.path.dirname(log_file))
-                log_dir_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            # Create log directory if needed with error handling
+            try:
+                if not os.path.isabs(log_file):
+                    Path(log_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
+                    log_file = os.path.join(log_dir, log_file)
+                else:
+                    log_dir_path = Path(os.path.dirname(log_file))
+                    log_dir_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            except (OSError, PermissionError) as e:
+                # Fall back to console-only logging if directory creation fails
+                print(f"Warning: Could not create log directory: {e}. "
+                      f"Continuing with console logging only.", file=sys.stderr)
+                log_file = None
             
-            # Use rotating file handler
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file,
-                maxBytes=max_bytes,
-                backupCount=backup_count
-            )
-            file_handler.setLevel(numeric_level)
-            
-            # Set restrictive file permissions
-            if os.path.exists(log_file):
-                os.chmod(log_file, file_permissions)
-            
-            # Always use structured logging for files
-            file_formatter = StructuredFormatter(sanitize=sanitize_logs) if enable_json else logging.Formatter(log_format)
-            file_handler.setFormatter(file_formatter)
-            root_logger.addHandler(file_handler)
+            # Use rotating file handler if log file is still valid
+            if log_file:
+                file_handler = logging.handlers.RotatingFileHandler(
+                    log_file,
+                    maxBytes=max_bytes,
+                    backupCount=backup_count
+                )
+                file_handler.setLevel(numeric_level)
+                
+                # Set restrictive file permissions
+                if os.path.exists(log_file):
+                    os.chmod(log_file, file_permissions)
+                
+                # Always use structured logging for files
+                file_formatter = StructuredFormatter(sanitize=sanitize_logs) if enable_json else logging.Formatter(log_format)
+                file_handler.setFormatter(file_formatter)
+                root_logger.addHandler(file_handler)
         except (OSError, IOError) as e:
             # Log error but don't fail completely
             print(f"Warning: Could not set up file logging: {e}", file=sys.stderr)
@@ -441,7 +461,7 @@ def get_debug_config() -> Dict[str, Any]:
     return {
         'log_prompts': os.getenv('CLAUDE_LOG_PROMPTS', 'true').lower() == 'true',
         'log_responses': os.getenv('CLAUDE_LOG_RESPONSES', 'true').lower() == 'true',
-        'truncate_length': int(os.getenv('CLAUDE_LOG_TRUNCATE_LENGTH', '10000')),
+        'truncate_length': int(os.getenv('CLAUDE_LOG_TRUNCATE_LENGTH', str(DEFAULT_TRUNCATE_LENGTH))),
         'log_level': os.getenv('CLAUDE_LOG_LEVEL', 'INFO')
     }
 

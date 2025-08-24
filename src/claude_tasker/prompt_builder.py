@@ -29,15 +29,19 @@ You MUST structure your entire response using the 4-D methodology with these EXA
 Analyze the task requirements and current codebase state to understand what needs to be built.
 
 # DIAGNOSE  
-Identify gaps between requirements and current implementation. Focus on verifying claimed completion status and identifying actual missing pieces.
+Identify gaps between requirements and current implementation. Focus on verifying claimed
+completion status and identifying actual missing pieces.
 
 # DEVELOP
-Plan your implementation approach. Specify how to fill identified gaps and ensure robust functionality.
+Plan your implementation approach. Specify how to fill identified gaps and ensure robust
+functionality.
 
 # DELIVER
-Implement the missing pieces of functionality, ensuring all modifications adhere to project conventions. Include tests and documentation as necessary.
+Implement the missing pieces of functionality, ensuring all modifications adhere to project
+conventions. Include tests and documentation as necessary.
 
-IMPORTANT: Use these exact headers (DECONSTRUCT, DIAGNOSE, DEVELOP, DELIVER) - NOT "Design, Deploy, Document" or other variations.
+IMPORTANT: Use these exact headers (DECONSTRUCT, DIAGNOSE, DEVELOP, DELIVER) - NOT
+"Design, Deploy, Document" or other variations.
 
 IMPORTANT: You MUST follow ALL guidelines and rules specified in CLAUDE.md. Key areas:
 - Project-specific coding conventions and patterns  
@@ -45,7 +49,8 @@ IMPORTANT: You MUST follow ALL guidelines and rules specified in CLAUDE.md. Key 
 - Comprehensive testing requirements
 - Error handling and performance standards
 
-Before writing any code, review the CLAUDE.md guidelines and ensure your implementation adheres to ALL specified rules.
+Before writing any code, review the CLAUDE.md guidelines and ensure your implementation
+adheres to ALL specified rules.
 """
     
     def generate_lyra_dev_prompt(self, issue_data: IssueData, claude_md_content: str, 
@@ -56,7 +61,8 @@ Before writing any code, review the CLAUDE.md guidelines and ensure your impleme
         
         prompt_parts = [
             self.lyra_dev_framework,
-            f"\n## Issue Context\n**Issue #{issue_data.number}: {issue_data.title}**\n{issue_data.body}",
+            (f"\n## Issue Context\n**Issue #{issue_data.number}: "
+             f"{issue_data.title}**\n{issue_data.body}"),
             f"\n## Project Guidelines (CLAUDE.md)\n{claude_md_content}",
         ]
         
@@ -70,7 +76,8 @@ Before writing any code, review the CLAUDE.md guidelines and ensure your impleme
         
         if context.get('project_info'):
             logger.debug("Including project info context")
-            prompt_parts.append(f"\n## Project Context\n{json.dumps(context['project_info'], indent=2)}")
+            prompt_parts.append(
+                f"\n## Project Context\n{json.dumps(context['project_info'], indent=2)}")
         
         final_prompt = "\n".join(prompt_parts)
         logger.debug(f"Generated Lyra-Dev prompt: {len(final_prompt)} characters")
@@ -81,7 +88,9 @@ Before writing any code, review the CLAUDE.md guidelines and ensure your impleme
         """Generate prompt for PR review analysis."""
         logger.debug(f"Generating PR review prompt for PR #{pr_data.number}")
         logger.debug(f"PR: {pr_data.title} by {pr_data.author}")
-        logger.debug(f"Changes: +{pr_data.additions}/-{pr_data.deletions} lines across {pr_data.changed_files} files")
+        logger.debug(
+            f"Changes: +{pr_data.additions}/-{pr_data.deletions} lines "
+            f"across {pr_data.changed_files} files")
         
         prompt = f"""
 You are conducting a comprehensive code review for this pull request.
@@ -187,7 +196,8 @@ Keep the response focused and practical. Format as markdown."""
         logger.debug(f"Generated bug analysis prompt: {len(prompt)} characters")
         return prompt
     
-    def _execute_llm_tool(self, tool_name: str, prompt: str, max_tokens: int = 4000, execute_mode: bool = False) -> Optional[Dict[str, Any]]:
+    def _execute_llm_tool(self, tool_name: str, prompt: str, max_tokens: int = 4000,
+                         execute_mode: bool = False) -> Optional[Dict[str, Any]]:
         """Generic LLM tool execution with common logic.
         
         Args:
@@ -240,7 +250,8 @@ Keep the response focused and practical. Format as markdown."""
             if tool_name == 'llm' or (tool_name == 'claude' and execute_mode):
                 logger.debug(f"Running command: {' '.join(cmd)}")
                 logger.debug(f"Passing prompt via stdin ({len(prompt)} chars)")
-                timeout_val = 1200 if execute_mode else 120  # 20 minutes for execution, 2 minutes for generation
+                # 20 minutes for execution, 2 minutes for generation
+                timeout_val = 1200 if execute_mode else 120
                 result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False, timeout=timeout_val)
             else:
                 result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
@@ -294,7 +305,7 @@ Keep the response focused and practical. Format as markdown."""
             logger.error(f"Error: {e}")
             return {
                 'success': False,
-                'error': f'Unexpected error: {str(e)}'
+                'error': f'Unexpected error: {e}'
             }
     
     def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
@@ -516,7 +527,7 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
             return results
             
         except Exception as e:
-            logger.error(f"Two-stage prompt execution failed with exception: {str(e)}")
+            logger.error(f"Two-stage prompt execution failed with exception: {e}")
             logger.debug("Exception details:", exc_info=True)
             results['error'] = str(e)
             return results
@@ -603,6 +614,6 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
             logger.error(f"Error executing Claude review: {e}")
             return {
                 'success': False,
-                'error': f"Unexpected error executing Claude review: {str(e)}",
+                'error': f"Unexpected error executing Claude review: {e}",
                 'exception': str(e)
             }

@@ -46,7 +46,8 @@ class TestSensitiveDataFilter(unittest.TestCase):
         """Test token filtering."""
         text = 'Authorization: Bearer token="abc123xyz"'
         filtered = self.filter.filter(text)
-        self.assertIn("token=***REDACTED***", filtered)
+        # Our improved pattern now catches Bearer tokens specifically
+        self.assertIn("Bearer ***TOKEN***", filtered)
         self.assertNotIn("abc123xyz", filtered)
     
     def test_filter_api_key(self):
