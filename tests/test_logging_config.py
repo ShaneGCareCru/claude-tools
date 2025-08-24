@@ -513,7 +513,7 @@ class TestIntegration(unittest.TestCase):
                 content = f.read()
                 
                 # Check that sensitive data was sanitized
-                self.assertIn('***REDACTED***', content)
+                self.assertIn('password=***REDACTED***', content)
                 self.assertNotIn('secret123', content)
                 
                 # Check that all log levels are present
@@ -533,7 +533,7 @@ class TestIntegration(unittest.TestCase):
             # Setup with small max_bytes to trigger rotation
             setup_logging(
                 log_file=log_file,
-                max_bytes=100,  # Very small to trigger rotation
+                max_bytes=1024,  # Small but valid to trigger rotation
                 backup_count=2
             )
             
