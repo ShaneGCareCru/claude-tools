@@ -364,16 +364,14 @@ class LogContext:
         
     def __enter__(self):
         """Enter context and set up logging adapter."""
-        self.adapter = logging.LoggerAdapter(self.logger, {})
-        # Override the process method to inject context
+        self.adapter = logging.LoggerAdapter(self.logger, self.context)
+        # Override the process method to inject context into record
         original_process = self.adapter.process
         
         def process_with_context(msg, kwargs):
-            # Add our context to extra fields
+            # Add our context directly to extra so it becomes record attributes
             extra = kwargs.get('extra', {})
-            if 'extra_fields' not in extra:
-                extra['extra_fields'] = {}
-            extra['extra_fields'].update(self.context)
+            extra['extra_fields'] = self.context.copy()
             kwargs['extra'] = extra
             return original_process(msg, kwargs)
         
