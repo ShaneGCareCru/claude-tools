@@ -22,8 +22,9 @@ class TestPromptBuilderExtended:
         """Test generate_bug_analysis_prompt."""
         bug_description = "Application crashes on startup"
         claude_md_content = "Project context"
+        context = {"additional": "context"}
         
-        result = prompt_builder.generate_bug_analysis_prompt(bug_description, claude_md_content)
+        result = prompt_builder.generate_bug_analysis_prompt(bug_description, claude_md_content, context)
         
         assert result is not None
         assert isinstance(result, str)
@@ -44,8 +45,9 @@ class TestPromptBuilderExtended:
             url="https://github.com/test/repo/pull/123"
         )
         pr_diff = "diff content"
+        claude_md_content = "Project context"
         
-        result = prompt_builder.generate_pr_review_prompt(pr_data, pr_diff)
+        result = prompt_builder.generate_pr_review_prompt(pr_data, pr_diff, claude_md_content)
         
         assert result is not None
         assert isinstance(result, str)
@@ -63,8 +65,9 @@ class TestPromptBuilderExtended:
             state="open"
         )
         claude_md_content = "Project context"
+        context = {"additional": "context"}
         
-        result = prompt_builder.generate_lyra_dev_prompt(issue_data, claude_md_content)
+        result = prompt_builder.generate_lyra_dev_prompt(issue_data, claude_md_content, context)
         
         assert result is not None
         assert isinstance(result, str)
@@ -74,14 +77,14 @@ class TestPromptBuilderExtended:
         """Test build_with_llm method."""
         prompt = "Test prompt"
         
-        mock_result = Mock(returncode=0, stdout="LLM Success", stderr="")
+        mock_result = Mock(returncode=0, stdout='{"result": "LLM Success"}', stderr="")
         
         with patch('subprocess.run', return_value=mock_result):
             with patch('tempfile.NamedTemporaryFile'):
                 result = prompt_builder.build_with_llm(prompt)
         
         assert result is not None
-        assert result['success'] is True
+        assert 'result' in result
     
     def test_build_with_llm_failure(self, prompt_builder):
         """Test build_with_llm with command failure."""
@@ -93,21 +96,20 @@ class TestPromptBuilderExtended:
             with patch('tempfile.NamedTemporaryFile'):
                 result = prompt_builder.build_with_llm(prompt)
         
-        assert result is not None
-        assert result['success'] is False
+        assert result is None
     
     def test_build_with_claude(self, prompt_builder):
         """Test build_with_claude method."""
         prompt = "Test prompt"
         
-        mock_result = Mock(returncode=0, stdout="Claude Success", stderr="")
+        mock_result = Mock(returncode=0, stdout='{"result": "Claude Success"}', stderr="")
         
         with patch('subprocess.run', return_value=mock_result):
             with patch('tempfile.NamedTemporaryFile'):
                 result = prompt_builder.build_with_claude(prompt)
         
         assert result is not None
-        assert result['success'] is True
+        assert 'result' in result
     
     def test_build_with_claude_execute_mode(self, prompt_builder):
         """Test build_with_claude in execute mode."""
@@ -120,7 +122,7 @@ class TestPromptBuilderExtended:
                 result = prompt_builder.build_with_claude(prompt, execute_mode=True)
         
         assert result is not None
-        assert result['success'] is True
+        assert 'result' in result
     
     def test_build_with_claude_review_mode(self, prompt_builder):
         """Test build_with_claude in review mode."""
@@ -133,7 +135,7 @@ class TestPromptBuilderExtended:
                 result = prompt_builder.build_with_claude(prompt, review_mode=True)
         
         assert result is not None
-        assert result['success'] is True
+        assert 'result' in result
     
     def test_build_with_claude_timeout(self, prompt_builder):
         """Test build_with_claude with timeout."""
@@ -145,11 +147,16 @@ class TestPromptBuilderExtended:
         
         assert result is not None
         assert result['success'] is False
-        assert 'timeout' in result['error'].lower()
+        assert 'timed out' in result['error'].lower()
     
     def test_validate_meta_prompt(self, prompt_builder):
         """Test validate_meta_prompt method."""
-        valid_prompt = "This is a valid prompt\nWith multiple lines"
+        valid_prompt = """This is a valid prompt with required sections:
+        DECONSTRUCT: Break down the problem
+        DIAGNOSE: Identify the issues  
+        DEVELOP: Create the solution
+        DELIVER: Implement and test
+        """ + "x" * 100  # Make it long enough
         
         result = prompt_builder.validate_meta_prompt(valid_prompt)
         assert result is True
@@ -175,9 +182,9 @@ class TestPromptBuilderExtended:
         result = prompt_builder.generate_meta_prompt(task_type, task_data, claude_md_content)
         
         assert result is not None
-        assert 'success' in result
-        assert result['success'] is True
-        assert 'prompt' in result
+        assert isinstance(result, str)
+        assert "DECONSTRUCT" in result
+        assert "DEVELOP" in result
     
     def test_execute_two_stage_prompt(self, prompt_builder):
         """Test execute_two_stage_prompt method."""
@@ -189,23 +196,22 @@ class TestPromptBuilderExtended:
         }
         claude_md_content = "Project context"
         
-        # Mock the generate_meta_prompt to return a successful result
+        # Mock the generate_meta_prompt to return a string
         with patch.object(prompt_builder, 'generate_meta_prompt') as mock_generate:
-            mock_generate.return_value = {
-                'success': True,
-                'prompt': 'Generated prompt'
-            }
+            mock_generate.return_value = """DECONSTRUCT: Break down
+            DIAGNOSE: Identify issues
+            DEVELOP: Create solution  
+            DELIVER: Implement""" + "x" * 100
             
-            # Mock build_with_claude to return success
-            with patch.object(prompt_builder, 'build_with_claude') as mock_build:
-                mock_build.return_value = {
-                    'success': True,
-                    'response': 'Execution complete'
-                }
-                
-                result = prompt_builder.execute_two_stage_prompt(
-                    task_type, task_data, claude_md_content, prompt_only=False
-                )
+            # Mock build_with_llm and build_with_claude to return success
+            with patch.object(prompt_builder, 'build_with_llm') as mock_llm:
+                mock_llm.return_value = {'result': 'Optimized prompt'}
+                with patch.object(prompt_builder, 'build_with_claude') as mock_build:
+                    mock_build.return_value = {'result': 'Execution complete'}
+                    
+                    result = prompt_builder.execute_two_stage_prompt(
+                        task_type, task_data, claude_md_content, prompt_only=False
+                    )
         
         assert result is not None
         assert result['success'] is True
@@ -220,12 +226,12 @@ class TestPromptBuilderExtended:
         }
         claude_md_content = "Project context"
         
-        # Mock the generate_meta_prompt to return a successful result
+        # Mock the generate_meta_prompt to return a string
         with patch.object(prompt_builder, 'generate_meta_prompt') as mock_generate:
-            mock_generate.return_value = {
-                'success': True,
-                'prompt': 'Generated prompt'
-            }
+            mock_generate.return_value = """DECONSTRUCT: Break down
+            DIAGNOSE: Identify issues
+            DEVELOP: Create solution  
+            DELIVER: Implement""" + "x" * 100
             
             with patch('builtins.print'):
                 result = prompt_builder.execute_two_stage_prompt(
@@ -245,12 +251,9 @@ class TestPromptBuilderExtended:
         }
         claude_md_content = "Project context"
         
-        # Mock the generate_meta_prompt to return a failure
+        # Mock the generate_meta_prompt to return a failure (empty string)
         with patch.object(prompt_builder, 'generate_meta_prompt') as mock_generate:
-            mock_generate.return_value = {
-                'success': False,
-                'error': 'Generation failed'
-            }
+            mock_generate.return_value = "short"  # Too short to validate
             
             result = prompt_builder.execute_two_stage_prompt(
                 task_type, task_data, claude_md_content, prompt_only=False
@@ -270,19 +273,18 @@ class TestPromptBuilderExtended:
         }
         claude_md_content = "Project context"
         
-        # Mock the generate_meta_prompt to return a successful result
+        # Mock the generate_meta_prompt to return a string
         with patch.object(prompt_builder, 'generate_meta_prompt') as mock_generate:
-            mock_generate.return_value = {
-                'success': True,
-                'prompt': 'Generated prompt'
-            }
+            mock_generate.return_value = """DECONSTRUCT: Break down
+            DIAGNOSE: Identify issues
+            DEVELOP: Create solution  
+            DELIVER: Implement""" + "x" * 100
             
-            # Mock build_with_claude to return failure
-            with patch.object(prompt_builder, 'build_with_claude') as mock_build:
-                mock_build.return_value = {
-                    'success': False,
-                    'error': 'Execution failed'
-                }
+            # Mock build_with_llm and build_with_claude to return None (failure)
+            with patch.object(prompt_builder, 'build_with_llm') as mock_llm:
+                mock_llm.return_value = None
+                with patch.object(prompt_builder, 'build_with_claude') as mock_build:
+                    mock_build.return_value = None
                 
                 result = prompt_builder.execute_two_stage_prompt(
                     task_type, task_data, claude_md_content, prompt_only=False

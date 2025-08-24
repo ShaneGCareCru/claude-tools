@@ -21,6 +21,10 @@ class IssueData:
     url: str
     author: str
     state: str
+    assignee: Optional[str] = None
+    milestone: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 @dataclass
