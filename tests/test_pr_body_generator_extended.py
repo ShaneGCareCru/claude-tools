@@ -24,6 +24,8 @@ class TestPRBodyGeneratorExtended:
             title="Test Issue",
             body="Test issue body",
             labels=["bug", "enhancement"],
+            url="https://github.com/test/repo/issues/42",
+            author="testuser",
             state="open",
             assignee="developer",
             milestone="v1.0",

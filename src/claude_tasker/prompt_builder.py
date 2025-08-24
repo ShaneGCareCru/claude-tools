@@ -226,7 +226,12 @@ Keep the response focused and practical. Format as markdown."""
             else:
                 logger.error(f"Command failed with return code {result.returncode}")
                 logger.error(f"stderr: {result.stderr[:500]}")
-                return None
+                return {
+                    'success': False,
+                    'error': f'Command failed with return code {result.returncode}',
+                    'stderr': result.stderr,
+                    'stdout': result.stdout
+                }
                 
         except subprocess.TimeoutExpired:
             logger.error("Command timed out")

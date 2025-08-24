@@ -152,8 +152,10 @@ class TestCriticalEdgeCases:
                 execute_mode=True
             )
             
-            # Should return None (failure) not crash
-            assert result is None
+            # Should return structured error response, not crash
+            assert result is not None
+            assert result['success'] is False
+            assert 'timed out' in result['error'].lower()
             
             # Verify timeout was set appropriately (updated to 20 minutes)
             mock_run.assert_called_once()

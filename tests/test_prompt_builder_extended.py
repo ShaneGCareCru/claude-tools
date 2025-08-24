@@ -145,7 +145,7 @@ class TestPromptBuilderExtended:
         
         assert result is not None
         assert result['success'] is False
-        assert 'timeout' in result['error'].lower()
+        assert 'timed out' in result['error'].lower()
     
     def test_validate_meta_prompt(self, prompt_builder):
         """Test validate_meta_prompt method."""

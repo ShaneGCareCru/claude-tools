@@ -285,3 +285,9 @@ class PRBodyGenerator:
         ])
         
         return "\n".join(parts)
+    
+    def _format_labels(self, labels):
+        """Format labels for display in PR body."""
+        if not labels:
+            return "None"
+        return ", ".join(f"`{label}`" for label in labels)
