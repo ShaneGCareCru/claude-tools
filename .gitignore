@@ -1,59 +1,18 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-.venv
-ENV/
-
-# Virtual environments
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Testing
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.nox/
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
+# Dependencies
+node_modules/
+jspm_packages/
 
 # Logs
+logs
 *.log
-logs/
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
-.eggs/
-
-# Node.js
-node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
 
-# Node.js diagnostic reports
+# Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
-
-# Package manager lock files (optional - uncomment if needed)
-# yarn.lock
-# pnpm-lock.yaml
-# package-lock.json
 
 # Runtime data
 pids
@@ -71,22 +30,23 @@ coverage
 # nyc test coverage
 .nyc_output
 
-# Grunt intermediate storage
+# Grunt intermediate storage (https://gruntjs.com/creating-plugins#storing-task-files)
 .grunt
 
-# Bower dependency directory
+# Bower dependency directory (https://bower.io/)
 bower_components
 
 # node-waf configuration
 .lock-wscript
 
-# Compiled binary addons
+# Compiled binary addons (https://nodejs.org/api/addons.html)
 build/Release
 
 # Dependency directories
+node_modules/
 jspm_packages/
 
-# Snowpack dependency directory
+# Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
 # TypeScript cache
@@ -123,7 +83,7 @@ web_modules/
 .env.production.local
 .env.local
 
-# parcel-bundler cache
+# parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
 
@@ -137,12 +97,16 @@ dist
 
 # Gatsby files
 .cache/
+# Comment in the public line in if your project uses Gatsby and not Next.js
+# https://nextjs.org/blog/next-9-1#public-directory-support
+# public
 
 # vuepress build output
 .vuepress/dist
 
 # vuepress v2.x temp and cache directory
 .temp
+.cache
 
 # Docusaurus cache and generated files
 .docusaurus
@@ -169,61 +133,127 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-# Vite
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
-
-# Claude CLI specific
-.claude/
-.claude_conversation_cache/
-.claude_api_cache/
-claude_conversation_*.json
-.claude-code/
-*.claude-session
-*.claude-backup
-
-# Claude agent files (temporary)
-*.agent
-*.meta-prompt
-*.response
-
-# Claude-specific directories
-.claude/cache/
-.claude/tmp/
-.claude/logs/
-.claude/sessions/
-.claude/history/
-
-# Test outputs
-test-repo/**/output/
-test-repo/**/.pytest_cache/
-test-repo/**/__pycache__/
-tests/__pycache__/
-tests/.pytest_cache/
-tests/*.pyc
-tests/test_*.pyc
-
-# Temporary files
-*.tmp
-*.bak
-*.swp
-*~
-.#*
-
-# OS files
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
 Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
 
-# Git
-*.orig
+# Windows shortcuts
+*.lnk
 
-# Local configuration
-local.conf
-*.local
+# JetBrains IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
 
-# API keys and secrets
-.env.local
-.env.*.local
-secrets/
-*.key
-*.pem
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+
+# Local History for Visual Studio Code
+.history/
+
+# Built Visual Studio Code Extensions
+*.vsix
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+.hypothesis/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Python virtual environments
+.venv/
+.virtualenv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Testing
+pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+.coverage.*
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env.*
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/

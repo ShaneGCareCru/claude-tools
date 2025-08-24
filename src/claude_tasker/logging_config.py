@@ -8,11 +8,18 @@ import logging.handlers
 import os
 import sys
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Pattern
+from typing import Optional, Dict, Any, List, Pattern, Tuple
 import json
 import functools
+
+
+# Constants for configuration defaults
+DEFAULT_TRUNCATE_LENGTH = 10000
+DEFAULT_MAX_BYTES = 10485760  # 10MB
+DEFAULT_BACKUP_COUNT = 5
+DEFAULT_FILE_PERMISSIONS = 0o600
 
 
 class SensitiveDataFilter:
@@ -25,6 +32,12 @@ class SensitiveDataFilter:
         (r'api[_-]?key["\']?\s*[:=]\s*["\']?[^\s"\',}]+', 'api_key=***REDACTED***'),
         (r'secret["\']?\s*[:=]\s*["\']?[^\s"\',}]+', 'secret=***REDACTED***'),
         (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '***EMAIL***'),
+        # Additional API key patterns
+        (r'sk-[a-zA-Z0-9]{48}', '***OPENAI_KEY***'),  # OpenAI
+        (r'xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}', '***SLACK_TOKEN***'),  # Slack
+        (r'ghp_[a-zA-Z0-9]{36}', '***GITHUB_TOKEN***'),  # GitHub Personal Access Token
+        (r'ghs_[a-zA-Z0-9]{36}', '***GITHUB_SECRET***'),  # GitHub Secret
+        (r'Bearer\s+[a-zA-Z0-9\-\._~\+\/]+', 'Bearer ***TOKEN***'),  # Bearer tokens
     ]
     
     def __init__(self, patterns: Optional[List[tuple]] = None):
@@ -58,7 +71,7 @@ class StructuredFormatter(logging.Formatter):
             message = self.filter.filter(message)
         
         log_obj = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'level': record.levelname,
             'logger': record.name,
             'message': message,
@@ -171,11 +184,14 @@ def setup_logging(
     log_format: Optional[str] = None,
     enable_colors: bool = True,
     enable_json: bool = False,
-    max_bytes: int = 10485760,  # 10MB
-    backup_count: int = 5,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    backup_count: int = DEFAULT_BACKUP_COUNT,
     log_dir: Optional[str] = None,
     sanitize_logs: bool = False,
-    file_permissions: int = 0o600
+    file_permissions: int = DEFAULT_FILE_PERMISSIONS,
+    log_prompts: bool = None,
+    log_responses: bool = None,
+    truncate_length: int = None
 ) -> Dict[str, Any]:
     """
     Setup comprehensive logging configuration for the application.
@@ -191,6 +207,9 @@ def setup_logging(
         log_dir: Directory for log files (default: 'logs')
         sanitize_logs: Enable sanitization of sensitive data in logs
         file_permissions: Unix file permissions for log files (default: 0o600)
+        log_prompts: Enable full prompt logging in DEBUG mode (default: True)
+        log_responses: Enable full response logging in DEBUG mode (default: True)
+        truncate_length: Maximum length for logged content before truncation (default: 10000)
         
     Returns:
         Dict containing logging configuration details
@@ -216,6 +235,14 @@ def setup_logging(
     enable_colors = os.getenv('CLAUDE_LOG_COLORS', str(enable_colors)).lower() == 'true'
     enable_json = os.getenv('CLAUDE_LOG_JSON', str(enable_json)).lower() == 'true'
     sanitize_logs = os.getenv('CLAUDE_LOG_SANITIZE', str(sanitize_logs)).lower() == 'true'
+    
+    # Debug logging options
+    if log_prompts is None:
+        log_prompts = os.getenv('CLAUDE_LOG_PROMPTS', 'true').lower() == 'true'
+    if log_responses is None:
+        log_responses = os.getenv('CLAUDE_LOG_RESPONSES', 'true').lower() == 'true'
+    if truncate_length is None:
+        truncate_length = int(os.getenv('CLAUDE_LOG_TRUNCATE_LENGTH', str(DEFAULT_TRUNCATE_LENGTH)))
     
     # Validate numeric parameters
     try:
@@ -271,30 +298,37 @@ def setup_logging(
             # Validate log file path
             log_file = validate_path(log_file, 'file')
             
-            # Create log directory if needed
-            if not os.path.isabs(log_file):
-                Path(log_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
-                log_file = os.path.join(log_dir, log_file)
-            else:
-                log_dir_path = Path(os.path.dirname(log_file))
-                log_dir_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            # Create log directory if needed with error handling
+            try:
+                if not os.path.isabs(log_file):
+                    Path(log_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
+                    log_file = os.path.join(log_dir, log_file)
+                else:
+                    log_dir_path = Path(os.path.dirname(log_file))
+                    log_dir_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            except (OSError, PermissionError) as e:
+                # Fall back to console-only logging if directory creation fails
+                print(f"Warning: Could not create log directory: {e}. "
+                      f"Continuing with console logging only.", file=sys.stderr)
+                log_file = None
             
-            # Use rotating file handler
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file,
-                maxBytes=max_bytes,
-                backupCount=backup_count
-            )
-            file_handler.setLevel(numeric_level)
-            
-            # Set restrictive file permissions
-            if os.path.exists(log_file):
-                os.chmod(log_file, file_permissions)
-            
-            # Always use structured logging for files
-            file_formatter = StructuredFormatter(sanitize=sanitize_logs) if enable_json else logging.Formatter(log_format)
-            file_handler.setFormatter(file_formatter)
-            root_logger.addHandler(file_handler)
+            # Use rotating file handler if log file is still valid
+            if log_file:
+                file_handler = logging.handlers.RotatingFileHandler(
+                    log_file,
+                    maxBytes=max_bytes,
+                    backupCount=backup_count
+                )
+                file_handler.setLevel(numeric_level)
+                
+                # Set restrictive file permissions
+                if os.path.exists(log_file):
+                    os.chmod(log_file, file_permissions)
+                
+                # Always use structured logging for files
+                file_formatter = StructuredFormatter(sanitize=sanitize_logs) if enable_json else logging.Formatter(log_format)
+                file_handler.setFormatter(file_formatter)
+                root_logger.addHandler(file_handler)
         except (OSError, IOError) as e:
             # Log error but don't fail completely
             print(f"Warning: Could not set up file logging: {e}", file=sys.stderr)
@@ -302,6 +336,11 @@ def setup_logging(
     # Configure specific loggers to avoid noise
     logging.getLogger('urllib3').setLevel(logging.WARNING)
     logging.getLogger('requests').setLevel(logging.WARNING)
+    
+    # Store debug logging options globally for use by other modules
+    os.environ['CLAUDE_LOG_PROMPTS'] = str(log_prompts).lower()
+    os.environ['CLAUDE_LOG_RESPONSES'] = str(log_responses).lower()
+    os.environ['CLAUDE_LOG_TRUNCATE_LENGTH'] = str(truncate_length)
     
     config_info = {
         'log_level': log_level,
@@ -314,7 +353,10 @@ def setup_logging(
         'backup_count': backup_count,
         'log_dir': log_dir,
         'file_permissions': oct(file_permissions),
-        'handlers': len(root_logger.handlers)
+        'handlers': len(root_logger.handlers),
+        'log_prompts': log_prompts,
+        'log_responses': log_responses,
+        'truncate_length': truncate_length
     }
     
     # Log initial configuration
@@ -408,6 +450,34 @@ def log_exception(logger: logging.Logger, message: str = "An error occurred"):
                 raise
         return wrapper
     return decorator
+
+
+def get_debug_config() -> Dict[str, Any]:
+    """Get current debug logging configuration.
+    
+    Returns:
+        Dict with debug logging settings
+    """
+    return {
+        'log_prompts': os.getenv('CLAUDE_LOG_PROMPTS', 'true').lower() == 'true',
+        'log_responses': os.getenv('CLAUDE_LOG_RESPONSES', 'true').lower() == 'true',
+        'truncate_length': int(os.getenv('CLAUDE_LOG_TRUNCATE_LENGTH', str(DEFAULT_TRUNCATE_LENGTH))),
+        'log_level': os.getenv('CLAUDE_LOG_LEVEL', 'INFO')
+    }
+
+
+def should_log_full_content() -> bool:
+    """Check if full content logging is enabled.
+    
+    Returns:
+        True if DEBUG level and full content logging is enabled
+    """
+    logger = logging.getLogger()
+    if not logger.isEnabledFor(logging.DEBUG):
+        return False
+    
+    config = get_debug_config()
+    return config['log_prompts'] or config['log_responses']
 
 
 # Initialize logging on module import if running as main application
