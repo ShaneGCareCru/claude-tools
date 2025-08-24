@@ -188,6 +188,10 @@ class TestRealExecutionIntegration:
         # This might hang or ask for permission, which is what we fixed
         # We expect either success or permission-related output
 
+    @pytest.mark.skipif(
+        os.getenv('CI') == 'true' or not shutil.which('claude'), 
+        reason="Requires claude CLI and interactive environment"
+    )
     def test_prompt_vs_execution_mode_difference(self, real_git_repo):
         """Test the critical difference between prompt_only=True and False.
         

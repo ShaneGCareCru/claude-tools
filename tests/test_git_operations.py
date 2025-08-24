@@ -243,7 +243,8 @@ class TestWorkspaceManager:
         workspace = WorkspaceManager()
         workspace.interactive_mode = True
         
-        with patch.object(workspace, '_confirm_cleanup', return_value=False):
+        with patch.object(workspace, '_confirm_cleanup', return_value=False), \
+             patch.object(workspace, 'is_working_directory_clean', return_value=False):
             result = workspace.workspace_hygiene()
             
             assert result is False
@@ -282,7 +283,8 @@ class TestWorkspaceManager:
         """Test user confirmation for cleanup - yes."""
         workspace = WorkspaceManager()
         
-        with patch('builtins.input', return_value='y'):
+        with patch('builtins.input', return_value='1'), \
+             patch('builtins.print'):
             result = workspace._confirm_cleanup()
             
             assert result is True
@@ -291,7 +293,8 @@ class TestWorkspaceManager:
         """Test user confirmation for cleanup - no."""
         workspace = WorkspaceManager()
         
-        with patch('builtins.input', return_value='n'):
+        with patch('builtins.input', return_value='3'), \
+             patch('builtins.print'):
             result = workspace._confirm_cleanup()
             
             assert result is False
@@ -491,9 +494,9 @@ class TestWorkspaceManager:
         workspace = WorkspaceManager()
         
         def side_effect(cmd):
-            if cmd == ['diff', '--quiet']:
-                return Mock(returncode=1)  # Unstaged changes
-            return Mock(returncode=0)
+            if cmd == ['status', '--porcelain']:
+                return Mock(returncode=0, stdout="M  file.py", stderr="")
+            return Mock(returncode=0, stdout="", stderr="")
         
         with patch.object(workspace, '_run_git_command', side_effect=side_effect), \
              patch('builtins.print'):  # Suppress debug prints
@@ -507,11 +510,9 @@ class TestWorkspaceManager:
         workspace = WorkspaceManager()
         
         def side_effect(cmd):
-            if cmd == ['diff', '--quiet']:
-                return Mock(returncode=0)  # No unstaged changes
-            elif cmd == ['diff', '--cached', '--quiet']:
-                return Mock(returncode=1)  # Staged changes
-            return Mock(returncode=0)
+            if cmd == ['status', '--porcelain']:
+                return Mock(returncode=0, stdout="A  new_file.py", stderr="")
+            return Mock(returncode=0, stdout="", stderr="")
         
         with patch.object(workspace, '_run_git_command', side_effect=side_effect), \
              patch('builtins.print'):  # Suppress debug prints
@@ -525,13 +526,9 @@ class TestWorkspaceManager:
         workspace = WorkspaceManager()
         
         def side_effect(cmd):
-            if cmd == ['diff', '--quiet']:
-                return Mock(returncode=0)  # No unstaged changes
-            elif cmd == ['diff', '--cached', '--quiet']:
-                return Mock(returncode=0)  # No staged changes
-            elif cmd == ['ls-files', '--others', '--exclude-standard']:
-                return Mock(returncode=0, stdout="untracked.txt\n")  # Untracked files
-            return Mock(returncode=0)
+            if cmd == ['status', '--porcelain']:
+                return Mock(returncode=0, stdout="?? untracked.txt", stderr="")
+            return Mock(returncode=0, stdout="", stderr="")
         
         with patch.object(workspace, '_run_git_command', side_effect=side_effect), \
              patch('builtins.print'):  # Suppress debug prints
@@ -545,13 +542,9 @@ class TestWorkspaceManager:
         workspace = WorkspaceManager()
         
         def side_effect(cmd):
-            if cmd == ['diff', '--quiet']:
-                return Mock(returncode=0)  # No unstaged changes
-            elif cmd == ['diff', '--cached', '--quiet']:
-                return Mock(returncode=0)  # No staged changes
-            elif cmd == ['ls-files', '--others', '--exclude-standard']:
-                return Mock(returncode=0, stdout="")  # No untracked files
-            return Mock(returncode=0)
+            if cmd == ['status', '--porcelain']:
+                return Mock(returncode=0, stdout="", stderr="")  # Clean workspace
+            return Mock(returncode=0, stdout="", stderr="")
         
         with patch.object(workspace, '_run_git_command', side_effect=side_effect), \
              patch('builtins.print'):  # Suppress debug prints
