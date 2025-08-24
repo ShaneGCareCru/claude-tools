@@ -394,7 +394,7 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                 # Run Claude in headless mode to generate the review
                 cmd = ['claude', '-p', prompt_file, '--permission-mode', 'bypassPermissions']
                 
-                logger.debug(f"Running command: {' '.join(cmd)}")
+                logger.debug(f"Running command: {cmd}")
                 logger.debug(f"Prompt length: {len(prompt)} chars")
                 
                 # Execute with longer timeout for review generation

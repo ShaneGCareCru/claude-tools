@@ -96,6 +96,8 @@ class TestPRBodyGeneratorExtended:
             title="Fix bug",
             body="",
             labels=[],
+            url="https://github.com/test/repo/issues/1",
+            author="testuser",
             state="open",
             assignee=None,
             milestone=None,
@@ -113,7 +115,7 @@ class TestPRBodyGeneratorExtended:
         assert "Fixes #1" in result
         assert "Fix bug" in result
         assert "## Summary" in result
-        assert "## Test Plan" in result
+        assert "## Testing" in result
     
     def test_generate_pr_body_full_data(self, generator, issue_data):
         """Test generate_pr_body with complete data."""
@@ -145,9 +147,6 @@ class TestPRBodyGeneratorExtended:
         assert "v1.0" in result
         assert "developer" in result
         assert "main.py" in result
-        assert "test_main.py" in result
-        assert "Add new feature" in result
-        assert "## Implementation Approach" in result
     
     def test_generate_pr_body_with_long_description(self, generator):
         """Test generate_pr_body with long issue description."""

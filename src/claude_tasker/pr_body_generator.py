@@ -43,7 +43,9 @@ class PRBodyGenerator:
                 'title': issue_data.title,
                 'body': issue_data.body[:1000],  # Truncate if too long
                 'labels': issue_data.labels,
-                'url': issue_data.url
+                'url': issue_data.url,
+                'assignee': issue_data.assignee,
+                'milestone': issue_data.milestone
             },
             'changes': {
                 'branch': branch_name,
@@ -58,7 +60,14 @@ class PRBodyGenerator:
     def _summarize_diff(self, git_diff: str) -> Dict[str, Any]:
         """Summarize git diff changes."""
         if not git_diff:
-            return {'files_changed': 0, 'summary': 'No changes'}
+            return {
+                'files_changed': 0,
+                'files': [],
+                'additions': 0,
+                'deletions': 0,
+                'net_change': 0,
+                'summary': 'No changes'
+            }
         
         lines = git_diff.split('\n')
         files_changed = []
