@@ -17,6 +17,7 @@ pip-delete-this-directory.txt
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 .tox/
 .nox/
@@ -191,6 +192,10 @@ claude_conversation_*.json
 test-repo/**/output/
 test-repo/**/.pytest_cache/
 test-repo/**/__pycache__/
+tests/__pycache__/
+tests/.pytest_cache/
+tests/*.pyc
+tests/test_*.pyc
 
 # Temporary files
 *.tmp
