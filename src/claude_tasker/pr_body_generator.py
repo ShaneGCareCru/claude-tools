@@ -315,28 +315,37 @@ class PRBodyGenerator:
     def _generate_test_checklist(self, git_diff):
         """Generate test checklist based on changes."""
         if not git_diff:
-            return [
-                "- [ ] Manual testing completed",
-                "- [ ] Automated tests pass"
-            ]
+            return "- [ ] Run existing tests\n- [ ] Verify no regressions"
         
-        checklist = []
+        checklist_items = []
+        
+        # Extract file names from diff
+        import re
+        files_changed = re.findall(r'diff --git a/([^\s]+)', git_diff)
         
         # Check if test files were modified
-        if "test_" in git_diff or "/tests/" in git_diff:
-            checklist.append("- [ ] New tests added for new functionality")
-            checklist.append("- [ ] All existing tests still pass")
-        else:
-            checklist.append("- [ ] Tests added/updated for changes")
+        if any("test_" in f or "/tests/" in f for f in files_changed):
+            checklist_items.append("- [ ] Run new/modified tests")
+            test_files = [f for f in files_changed if "test_" in f or "/tests/" in f]
+            for test_file in test_files:
+                checklist_items.append(f"- [ ] Verify {test_file} passes")
         
         # Check if source files were modified
-        if "src/" in git_diff or ".py" in git_diff:
-            checklist.append("- [ ] Code follows project style guidelines")
-            checklist.append("- [ ] Documentation updated if needed")
+        src_files = [f for f in files_changed if f.endswith('.py') and 'test_' not in f]
+        if src_files:
+            checklist_items.append("- [ ] Test affected functionality")
+            for src_file in src_files:
+                checklist_items.append(f"- [ ] Test changes in {src_file}")
         
-        checklist.extend([
-            "- [ ] Manual testing completed", 
-            "- [ ] Automated tests pass"
-        ])
-        
-        return checklist
+        # Check for config changes
+        config_files = [f for f in files_changed if any(f.endswith(ext) for ext in ['.yml', '.yaml', '.json', '.toml', '.cfg', '.ini', '.txt'])]
+        if config_files:
+            # Special handling for dependency files
+            if any('package.json' in f or 'requirements.txt' in f or 'poetry.lock' in f for f in config_files):
+                checklist_items.append("- [ ] Verify dependency installation")
+            else:
+                checklist_items.append("- [ ] Verify configuration changes")
+            for config_file in config_files:
+                checklist_items.append(f"- [ ] Test {config_file} changes")
+            
+        return '\n'.join(checklist_items) if checklist_items else "- [ ] Run existing tests\n- [ ] Verify no regressions"
