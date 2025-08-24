@@ -189,3 +189,71 @@ out/
 
 # Built Visual Studio Code Extensions
 *.vsix
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+.hypothesis/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Python virtual environments
+.venv/
+.virtualenv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Testing
+pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+.coverage.*
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env.*
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
