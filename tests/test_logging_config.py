@@ -294,17 +294,29 @@ class TestSetupLogging(unittest.TestCase):
     
     def test_environment_variables(self):
         """Test configuration from environment variables."""
-        os.environ['CLAUDE_LOG_LEVEL'] = 'DEBUG'
-        os.environ['CLAUDE_LOG_JSON'] = 'true'
-        os.environ['CLAUDE_LOG_SANITIZE'] = 'true'
-        os.environ['CLAUDE_LOG_MAX_BYTES'] = '5000'
+        # Save original values
+        env_vars = ['CLAUDE_LOG_LEVEL', 'CLAUDE_LOG_JSON', 'CLAUDE_LOG_SANITIZE', 'CLAUDE_LOG_MAX_BYTES']
+        original_values = {var: os.environ.get(var) for var in env_vars}
         
-        config = setup_logging()
-        
-        self.assertEqual(config['log_level'], 'DEBUG')
-        self.assertTrue(config['enable_json'])
-        self.assertTrue(config['sanitize_logs'])
-        self.assertEqual(config['max_bytes'], 5000)
+        try:
+            os.environ['CLAUDE_LOG_LEVEL'] = 'DEBUG'
+            os.environ['CLAUDE_LOG_JSON'] = 'true'
+            os.environ['CLAUDE_LOG_SANITIZE'] = 'true'
+            os.environ['CLAUDE_LOG_MAX_BYTES'] = '5000'
+            
+            config = setup_logging()
+            
+            self.assertEqual(config['log_level'], 'DEBUG')
+            self.assertTrue(config['enable_json'])
+            self.assertTrue(config['sanitize_logs'])
+            self.assertEqual(config['max_bytes'], 5000)
+        finally:
+            # Restore original values
+            for var, value in original_values.items():
+                if value is not None:
+                    os.environ[var] = value
+                else:
+                    os.environ.pop(var, None)
     
     def test_invalid_log_level(self):
         """Test invalid log level handling."""
@@ -313,10 +325,20 @@ class TestSetupLogging(unittest.TestCase):
     
     def test_invalid_numeric_env_vars(self):
         """Test invalid numeric environment variables."""
-        os.environ['CLAUDE_LOG_MAX_BYTES'] = 'not_a_number'
+        # Save original value
+        original_value = os.environ.get('CLAUDE_LOG_MAX_BYTES')
         
-        with self.assertRaises(ValueError):
-            setup_logging()
+        try:
+            os.environ['CLAUDE_LOG_MAX_BYTES'] = 'not_a_number'
+            
+            with self.assertRaises(ValueError):
+                setup_logging()
+        finally:
+            # Restore original value
+            if original_value is not None:
+                os.environ['CLAUDE_LOG_MAX_BYTES'] = original_value
+            else:
+                os.environ.pop('CLAUDE_LOG_MAX_BYTES', None)
     
     def test_file_permissions(self):
         """Test file permissions setting."""
