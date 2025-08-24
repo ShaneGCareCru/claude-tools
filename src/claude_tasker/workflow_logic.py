@@ -107,6 +107,13 @@ class WorkflowLogic:
                     issue_number=issue_number
                 )
             
+            # Validate that we're on the correct branch for this issue
+            branch_valid, branch_msg = self.workspace_manager.validate_branch_for_issue(issue_number)
+            if not branch_valid:
+                logger.warning(f"Branch validation failed: {branch_msg}")
+                print(f"⚠️  Warning: {branch_msg}")
+                # Don't fail hard, but warn the user about the mismatch
+            
             # Check if issue is already closed
             if issue_data.state.lower() == 'closed':
                 return WorkflowResult(

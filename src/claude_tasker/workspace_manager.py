@@ -151,6 +151,13 @@ class WorkspaceManager:
         timestamp = str(int(time.time()))
         branch_name = f"issue-{issue_number}-{timestamp}"
         
+        logger.info(f"Creating branch '{branch_name}' for issue #{issue_number}")
+        
+        # Validation: Ensure issue number in branch name matches expected issue
+        if issue_number <= 0:
+            logger.error(f"Invalid issue number: {issue_number}")
+            return False, f"Invalid issue number: {issue_number}"
+        
         # First, fetch to ensure we have the latest remote branches
         result = self._run_git_command(['fetch', 'origin'])
         if result.returncode != 0:
@@ -185,6 +192,37 @@ class WorkspaceManager:
             return False, f"Failed to create branch {branch_name}: {result.stderr}"
         
         return True, branch_name
+    
+    def validate_branch_for_issue(self, issue_number: int) -> Tuple[bool, str]:
+        """Validate that current branch corresponds to the expected issue number."""
+        current_branch = self.get_current_branch()
+        if not current_branch:
+            return False, "Could not determine current branch"
+        
+        # Parse issue number from branch name (format: issue-{number}-{timestamp})
+        if current_branch.startswith('issue-'):
+            try:
+                # Extract issue number from branch name
+                parts = current_branch.split('-')
+                if len(parts) >= 2:
+                    branch_issue_number = int(parts[1])
+                    if branch_issue_number != issue_number:
+                        logger.warning(f"Branch '{current_branch}' indicates issue #{branch_issue_number} but processing issue #{issue_number}")
+                        suggestion = f"Consider switching to main branch first: git checkout main"
+                        return False, f"Branch mismatch: branch '{current_branch}' suggests issue #{branch_issue_number}, but processing issue #{issue_number}. {suggestion}"
+                    return True, f"Branch '{current_branch}' correctly matches issue #{issue_number}"
+                else:
+                    logger.warning(f"Branch '{current_branch}' has unexpected format")
+                    return False, f"Branch '{current_branch}' has unexpected naming format"
+            except ValueError:
+                logger.warning(f"Could not parse issue number from branch '{current_branch}'")
+                return False, f"Could not parse issue number from branch '{current_branch}'"
+        else:
+            # Not an issue branch, which might be intentional (e.g., main branch work)
+            logger.info(f"Working on non-issue branch '{current_branch}' for issue #{issue_number}")
+            return True, f"Working on branch '{current_branch}' (not an issue-specific branch)"
+        
+        return True, "Branch validation passed"
     
     def commit_changes(self, message: str, branch_name: str) -> bool:
         """Stage and commit all changes."""

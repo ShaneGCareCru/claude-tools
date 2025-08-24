@@ -77,9 +77,11 @@ Install with: `pip install -r requirements.txt`
 
 ### Git Workflow
 - Always creates timestamped branches: `issue-<number>-<timestamp>`
+- Validates branch names match the issue being processed
 - Commits with standardized messages following conventional commit format
 - Only creates PRs when actual code changes are made
 - Gracefully handles "already complete" cases
+- Warns users when branch/issue number mismatches occur
 
 ### Testing
 - Run tests with: `pytest tests/`
