@@ -75,6 +75,7 @@ class PRBodyGenerator:
         deletions = 0
         
         for line in lines:
+            line = line.strip()  # Remove leading/trailing whitespace
             if line.startswith('diff --git'):
                 # Extract file path from diff header
                 parts = line.split(' ')
@@ -110,6 +111,7 @@ class PRBodyGenerator:
         lines = git_diff.split('\n')
         
         for line in lines:
+            line = line.strip()  # Remove leading/trailing whitespace
             if line.startswith('diff --git'):
                 pass  # Just tracking file boundaries
             elif line.startswith('new file mode'):
@@ -122,7 +124,7 @@ class PRBodyGenerator:
                 stats['lines_deleted'] += 1
         
         # Count modified files (files that are neither added nor deleted)
-        total_files = len([line for line in lines if line.startswith('diff --git')])
+        total_files = len([line.strip() for line in lines if line.strip().startswith('diff --git')])
         stats['files_modified'] = total_files - stats['files_added'] - stats['files_deleted']
         
         return stats
@@ -280,6 +282,15 @@ class PRBodyGenerator:
                 parts.append(f"- {', '.join(changes)}")
             
             parts.append(f"- {stats['lines_added']} lines added, {stats['lines_deleted']} lines deleted")
+        
+        # Add file names if available in diff summary
+        diff_summary = context.get('changes', {}).get('diff_summary', {})
+        if diff_summary.get('files'):
+            parts.extend([
+                "",
+                "## Modified Files",
+                f"- {', '.join(diff_summary['files'])}"
+            ])
         
         parts.extend([
             "",

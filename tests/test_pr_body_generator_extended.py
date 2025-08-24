@@ -155,6 +155,8 @@ class TestPRBodyGeneratorExtended:
             title="Complex Feature",
             body="This is a very long description. " * 50,  # Very long body
             labels=["feature"],
+            url="https://github.com/test/repo/issues/100",
+            author="testuser",
             state="open",
             assignee=None,
             milestone=None,

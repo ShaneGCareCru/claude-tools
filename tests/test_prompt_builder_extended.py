@@ -23,7 +23,8 @@ class TestPromptBuilderExtended:
         bug_description = "Application crashes on startup"
         claude_md_content = "Project context"
         
-        result = prompt_builder.generate_bug_analysis_prompt(bug_description, claude_md_content)
+        context = {'recent_commits': 'commit log', 'git_diff': 'diff'}
+        result = prompt_builder.generate_bug_analysis_prompt(bug_description, claude_md_content, context)
         
         assert result is not None
         assert isinstance(result, str)
@@ -44,6 +45,7 @@ class TestPromptBuilderExtended:
             url="https://github.com/test/repo/pull/123"
         )
         pr_diff = "diff content"
+        claude_md_content = "Project context"
         
         result = prompt_builder.generate_pr_review_prompt(pr_data, pr_diff, claude_md_content)
         
