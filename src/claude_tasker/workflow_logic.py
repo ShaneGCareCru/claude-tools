@@ -224,7 +224,7 @@ class WorkflowLogic:
                 prompt_only=prompt_only
             )
             
-            if not prompt_result['success']:
+            if not prompt_result.success:
                 return WorkflowResult(
                     success=False,
                     message="Prompt generation failed",
@@ -448,10 +448,10 @@ The issue has been reviewed and no further action is needed at this time.
                 )
             
             if not review_result.text:
-                logger.error(f"Review result missing 'response' field for PR #{pr_number}")
-                logger.debug(f"Review result keys: {review_result.keys()}")
-                print(f"[ERROR] Review result missing 'response' field for PR #{pr_number}")
-                print(f"[DEBUG] Review result keys: {review_result.keys()}")
+                logger.error(f"Review result missing 'text' field for PR #{pr_number}")
+                logger.debug(f"Review result attributes: success={review_result.success}, data={review_result.data}, text={bool(review_result.text)}")
+                print(f"[ERROR] Review result missing 'text' field for PR #{pr_number}")
+                print(f"[DEBUG] Review result attributes: success={review_result.success}, data={review_result.data}, text={bool(review_result.text)}")
                 return WorkflowResult(
                     success=False,
                     message=f"Failed to generate review for PR #{pr_number} - no response content"
