@@ -107,3 +107,6 @@ Install with: `pip install -r requirements.txt`
 ## Historical Note
 
 A deprecated bash implementation has been archived in `archive/bash_implementation/` for historical reference. The Python implementation is the actively maintained version.
+
+
+### END OF CLAUDE.MD FILE ###

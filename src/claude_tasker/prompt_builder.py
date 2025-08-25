@@ -280,11 +280,7 @@ From the free-form bug notes provided below, produce a *production-quality* GitH
 
 ## OUTPUT (Markdown)
 
-<!-- meta: labels=bug,needs-triage,{optional: area:<component>, severity:S#, priority:P#, regression?:yes/no} -->
 
-<!-- meta: assignees=@oncall,{optional: @owner} -->
-
-<!-- meta: milestone= -->
 
 # Bug: [<component>] <concise problem statement>
 
@@ -354,6 +350,9 @@ From the free-form bug notes provided below, produce a *production-quality* GitH
 1. <specific question #1>
 2. <specific question #2>
 3. <specific question #3>
+
+labels=bug,needs-triage,{optional: area:<component>, severity:S#, priority:P#, regression?:yes/no} 
+meta: milestone=
 
 Provide only the complete GitHub issue content following this template - no additional commentary."""
 
