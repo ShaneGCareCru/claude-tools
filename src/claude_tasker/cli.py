@@ -173,6 +173,13 @@ Examples:
         help='LLM tool to use (default: claude)'
     )
     
+    # Version argument
+    parser.add_argument(
+        '--version',
+        action='version',
+        version='%(prog)s 1.0.0'
+    )
+    
     return parser
 
 
