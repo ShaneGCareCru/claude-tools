@@ -22,10 +22,17 @@ class ClaudeTasker < Formula
     # Pre-flight dependency validation
     validate_dependencies
 
-    # Install Python dependencies from requirements.txt
+    # Create virtual environment and install dependencies
     venv = virtualenv_create(libexec, "python3.11")
-    system libexec/"bin/pip", "install", "-r", "requirements.txt"
+    
+    # Install requirements manually
     venv.pip_install_and_link buildpath, link_manpages: false
+    
+    # Install specific dependencies
+    dependencies = %w[typing-extensions pydantic python-json-logger colorlog rich]
+    dependencies.each do |dep|
+      venv.pip_install dep
+    end
 
     # Create robust wrapper script with error handling
     (bin/"claude-tasker").write <<~EOS
