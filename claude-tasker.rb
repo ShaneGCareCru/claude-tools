@@ -3,9 +3,9 @@ class ClaudeTasker < Formula
 
   desc "Context-aware wrapper for Claude Code with GitHub integration"
   homepage "https://github.com/ShaneGCareCru/claude-tools"
-  url "https://github.com/ShaneGCareCru/claude-tools/archive/main.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  url "https://github.com/ShaneGCareCru/claude-tools/archive/refs/tags/v1.0.0.tar.gz"
   version "1.0.0"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "MIT"
   head "https://github.com/ShaneGCareCru/claude-tools.git", branch: "main"
 
