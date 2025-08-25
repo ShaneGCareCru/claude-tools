@@ -219,7 +219,7 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Testing
-pytest_cache/
+.pytest_cache/
 .tox/
 nosetests.xml
 coverage.xml
