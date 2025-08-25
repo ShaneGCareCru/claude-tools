@@ -220,6 +220,8 @@ pip-delete-this-directory.txt
 
 # Testing
 pytest_cache/
+.pytest_cache/
+*pytest*.pyc
 .tox/
 nosetests.xml
 coverage.xml
