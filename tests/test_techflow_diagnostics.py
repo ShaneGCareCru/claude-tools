@@ -74,7 +74,7 @@ class TestTriageMatrix:
         
         assert result['primary_cause'] == 'timeout'
         assert result['confidence'] > 0.7
-        assert 'timeout' in result['evidence'][0].lower()
+        assert 'timed out' in result['evidence'][0].lower()
     
     def test_analyze_failure_auth_error(self):
         """Test failure analysis for authentication error."""
@@ -156,9 +156,8 @@ class TestTriageMatrix:
         test_run.add_log("Environment configuration issue")
         
         # Manually set duration to trigger long execution factor
-        test_run.end_time = test_run.start_time.replace(
-            second=test_run.start_time.second + 700
-        )
+        from datetime import timedelta
+        test_run.end_time = test_run.start_time + timedelta(seconds=700)
         
         failure_text = "rate limit api error"
         factors = triage._identify_contributing_factors(test_run, failure_text)

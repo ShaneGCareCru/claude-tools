@@ -570,14 +570,17 @@ If issues arise, revert authentication changes and restore previous generic erro
         """Parse branch name from CLI output."""
         import re
         patterns = [
-            r'[Bb]ranch[:\s]+([^\s\n]+)',
             r'[Cc]reated branch[:\s]+([^\s\n]+)',
+            r'[Bb]ranch[:\s]+([a-zA-Z0-9_-]+(?:-\d+)*)',  # More specific for actual branch names
             r'issue-\d+-\d+'
         ]
         
         for pattern in patterns:
             match = re.search(pattern, output)
             if match:
-                return match.group(1) if pattern.startswith('[') else match.group(0)
+                result = match.group(1) if pattern.startswith('[') else match.group(0)
+                # Don't match generic words like 'info'
+                if result and len(result) > 3 and not result in ['info', 'name', 'data']:
+                    return result
         
         return None
