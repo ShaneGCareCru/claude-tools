@@ -10,6 +10,7 @@ from src.claude_tasker.workflow_logic import WorkflowLogic, WorkflowResult
 from src.claude_tasker.prompt_builder import PromptBuilder
 from src.claude_tasker.github_client import GitHubClient, IssueData
 from src.claude_tasker.workspace_manager import WorkspaceManager
+from src.claude_tasker.prompt_models import TwoStageResult
 
 
 class TestCLICoverageImprovements:
@@ -121,10 +122,10 @@ class TestWorkflowLogicCoverageImprovements:
         mock_workspace.return_value = mock_workspace_instance
         
         mock_prompt_instance = Mock()
-        mock_prompt_instance.execute_two_stage_prompt.return_value = {
-            'success': True,
-            'response': 'Done'
-        }
+        mock_prompt_instance.execute_two_stage_prompt.return_value = TwoStageResult(
+            success=True,
+            optimized_prompt='Test optimized prompt'
+        )
         mock_prompt.return_value = mock_prompt_instance
         
         mock_pr_gen_instance = Mock()

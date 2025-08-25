@@ -8,6 +8,7 @@ from unittest.mock import patch, Mock, mock_open, call
 
 from src.claude_tasker.workflow_logic import WorkflowLogic, WorkflowResult
 from src.claude_tasker.github_client import IssueData, PRData
+from src.claude_tasker.prompt_models import TwoStageResult
 
 
 class TestWorkflowLogic:
@@ -33,12 +34,12 @@ class TestWorkflowLogic:
             mock_get_issue.return_value = issue_data
             
             # Mock two-stage execution result
-            mock_two_stage.return_value = {
-                'success': True,
-                'meta_prompt': 'Generated meta prompt',
-                'optimized_prompt': 'Test optimized prompt',
-                'execution_result': None
-            }
+            mock_two_stage.return_value = TwoStageResult(
+                success=True,
+                meta_prompt='Generated meta prompt',
+                optimized_prompt='Test optimized prompt',
+                execution_result=None
+            )
             
             # Mock environment validation
             with patch.object(workflow, 'validate_environment') as mock_env:
@@ -132,12 +133,12 @@ class TestWorkflowLogic:
             mock_get_issue.return_value = issue_data
             
             # Mock two-stage execution with audit and implement phases
-            mock_two_stage.return_value = {
-                'success': True,
-                'meta_prompt': 'Audit prompt: gaps identified',
-                'optimized_prompt': 'Implementation prompt with gap analysis',
-                'execution_result': {'result': 'Implementation complete'}
-            }
+            mock_two_stage.return_value = TwoStageResult(
+                success=True,
+                meta_prompt='Audit prompt: gaps identified',
+                optimized_prompt='Implementation prompt with gap analysis',
+                execution_result={'result': 'Implementation complete'}
+            )
             
             # Mock all workflow dependencies
             with patch.object(workflow, 'validate_environment') as mock_env, \

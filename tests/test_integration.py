@@ -8,7 +8,7 @@ from unittest.mock import patch, Mock, mock_open, call
 
 from src.claude_tasker.workflow_logic import WorkflowLogic, WorkflowResult
 from src.claude_tasker.github_client import IssueData, PRData
-from src.claude_tasker.prompt_models import LLMResult
+from src.claude_tasker.prompt_models import LLMResult, TwoStageResult
 
 
 class TestIntegration:
@@ -42,12 +42,12 @@ class TestIntegration:
             mock_hygiene.return_value = True
             mock_branch.return_value = (True, "issue-316-1234567890")
             
-            mock_prompt.return_value = {
-                'success': True,
-                'meta_prompt': 'Generated meta prompt for test implementation',
-                'optimized_prompt': 'Comprehensive test implementation prompt',
-                'execution_result': None  # Prompt-only mode
-            }
+            mock_prompt.return_value = TwoStageResult(
+                success=True,
+                meta_prompt='Generated meta prompt for test implementation',
+                optimized_prompt='Comprehensive test implementation prompt',
+                execution_result=None  # Prompt-only mode
+            )
             
             # Execute workflow
             result = workflow.process_single_issue(316, prompt_only=True)
@@ -220,12 +220,12 @@ class TestIntegration:
             mock_hygiene.return_value = True
             mock_branch.return_value = (True, "issue-316-1234567890")
             
-            mock_prompt.return_value = {
-                'success': True,
-                'meta_prompt': 'Generated meta prompt with project context',
-                'optimized_prompt': 'Project-aware implementation prompt',
-                'execution_result': None
-            }
+            mock_prompt.return_value = TwoStageResult(
+                success=True,
+                meta_prompt='Generated meta prompt with project context',
+                optimized_prompt='Project-aware implementation prompt',
+                execution_result=None
+            )
             
             # Execute workflow with project context
             result = workflow.process_single_issue(316, prompt_only=True, project_number=3)
@@ -331,7 +331,7 @@ class TestIntegration:
             mock_get_project.return_value = {"title": "Test Project"}
             mock_hygiene.return_value = True
             mock_branch.return_value = (True, "issue-316-1234567890")
-            mock_prompt.return_value = {'success': True, 'meta_prompt': 'test', 'optimized_prompt': 'test'}
+            mock_prompt.return_value = TwoStageResult(success=True, meta_prompt='test', optimized_prompt='test')
             
             # Execute with project context
             result = workflow.process_single_issue(316, prompt_only=True, project_number=3)
