@@ -7,6 +7,7 @@ from typing import Dict, Optional, Any
 from pathlib import Path
 from .github_client import IssueData, PRData
 from src.claude_tasker.logging_config import get_logger
+from .prompt_models import ExecutionOptions, PromptContext, LLMResult, TwoStageResult
 import logging
 
 logger = get_logger(__name__)
@@ -169,35 +170,413 @@ Format your review as constructive feedback with specific suggestions for improv
     
     def generate_bug_analysis_prompt(self, bug_description: str, claude_md_content: str,
                                    context: Dict[str, Any]) -> str:
-        """Generate prompt for bug analysis and issue creation."""
-        logger.debug(f"Generating bug analysis prompt")
+        """Generate BugSmith prompt for comprehensive bug analysis and issue creation."""
+        logger.debug(f"Generating BugSmith prompt")
         logger.debug(f"Bug description length: {len(bug_description)} characters")
-        logger.debug(f"Context keys: {list(context.keys())}")
         
-        # Use a simpler, more focused prompt to avoid Claude CLI timeouts
-        prompt = f"""Analyze this bug and create a GitHub issue:
-
-Bug Description: {bug_description}
-
-Create a well-structured GitHub issue with:
-
-**Title**: Bug: [concise description]
-
-**Description**:
-- **Summary**: What's wrong?
-- **Steps to Reproduce**: How to trigger the bug
-- **Expected Behavior**: What should happen
-- **Actual Behavior**: What actually happens  
-- **Potential Cause**: Likely root cause
-- **Suggested Fix**: How to resolve it
-
-Keep the response focused and practical. Format as markdown."""
+        # Handle both dict and PromptContext object
+        if hasattr(context, 'git_diff'):
+            # PromptContext object
+            logger.debug(f"Context fields: git_diff={bool(context.git_diff)}, related_files={len(context.related_files)}, project_info={bool(context.project_info)}")
+        else:
+            # Dict object
+            logger.debug(f"Context keys: {list(context.keys())}")
         
-        logger.debug(f"Generated bug analysis prompt: {len(prompt)} characters")
-        return prompt
+        # BugSmith prompt with project context
+        bugsmith_prompt = f"""# BugSmith — Optimized Prompt for GitHub Issue Generation
+
+You are **BugSmith**, a senior triage engineer and technical writer who transforms messy notes into high-signal GitHub issues that engineers can act on immediately.
+
+## GOAL
+
+From the free-form bug notes provided below, produce a *production-quality* GitHub issue in Markdown, with explicit metadata, clean structure, and actionable next steps. When information is missing, do not stall: make cautious, clearly labeled assumptions and list precise follow-up questions.
+
+## INPUT
+
+`[BUG_NOTES]`: {bug_description}
+
+## PROJECT CONTEXT
+
+{claude_md_content}"""
+
+        # Add context information if available
+        # Handle both dict and PromptContext object
+        git_diff = getattr(context, 'git_diff', None) or context.get('git_diff') if hasattr(context, 'get') else None
+        related_files = getattr(context, 'related_files', []) or context.get('related_files', []) if hasattr(context, 'get') else []
+        project_info = getattr(context, 'project_info', {}) or context.get('project_info', {}) if hasattr(context, 'get') else {}
+        
+        if git_diff:
+            logger.debug(f"Including git diff ({len(git_diff)} chars)")
+            bugsmith_prompt += f"\n\n## CURRENT CHANGES\n```diff\n{git_diff}\n```"
+        
+        if related_files:
+            logger.debug(f"Including {len(related_files)} related files")
+            bugsmith_prompt += f"\n\n## RELATED FILES\n{chr(10).join(related_files)}"
+        
+        if project_info:
+            logger.debug("Including project info context")
+            bugsmith_prompt += f"\n\n## PROJECT INFO\n{json.dumps(project_info, indent=2)}"
+
+        # Complete BugSmith methodology
+        bugsmith_methodology = """
+
+## PROCESS (4D)
+
+1. **Deconstruct**
+
+   * Extract: core problem, component/module, commands/URLs, error messages/codes, versions, environment (OS, browser, device, region), dates/times, affected users/scope, regressions, dependencies.
+   * Pull facts from logs (timestamps, codes, stack frames) and dedupe.
+
+2. **Diagnose**
+
+   * Identify ambiguity and missing data.
+   * Infer severity & priority from impact (see rubric).
+   * Detect security/privacy or data-loss implications.
+   * Decide if it's likely regression, config, feature request, or true defect.
+
+3. **Develop**
+
+   * Create minimal, deterministic **Steps to Reproduce** (numbered, starting from a clean state).
+   * Write clear **Expected vs Actual** (present tense, no blame).
+   * Draft a plausible **Suspected Cause** (point to specific areas: file/function/flag).
+   * Propose **Workaround** if any.
+   * Define **Acceptance Criteria** as a checklist that QA can verify.
+
+4. **Deliver**
+
+   * Output strictly in the Markdown template below.
+   * Keep the title ≤ 80 chars, include the component if known (`[component] short summary`).
+   * Redact secrets/PII in logs (mask all tokens/keys/IPs except last 4 chars).
+
+## SEVERITY & PRIORITY RUBRIC
+
+* **S1 / P0**: Outage, data loss, security exposure, blocks most users, no workaround.
+* **S2 / P1**: Major feature broken or blocks core flows; limited workaround.
+* **S3 / P2**: Partial impairment or incorrect behavior; reasonable workaround.
+* **S4 / P3**: Minor/visual/text issues; polish.
+
+## OUTPUT (Markdown)
+
+<!-- meta: labels=bug,needs-triage,{optional: area:<component>, severity:S#, priority:P#, regression?:yes/no} -->
+
+<!-- meta: assignees=@oncall,{optional: @owner} -->
+
+<!-- meta: milestone= -->
+
+# Bug: [<component>] <concise problem statement>
+
+## Summary
+
+* **Impact**: <who/what is affected; scope and business/user impact>
+* **First Seen**: <UTC timestamp or "unknown">
+* **Severity / Priority**: <S# / P#> (reasoning: <1-2 lines>)
+* **Regression**: <yes/no/unknown> (introduced in <version/commit> if known)
+
+## Environment
+
+| Item        | Value                       |
+| ----------- | --------------------------- |
+| App/Service | <name>                      |
+| Version     | <semver/commit>            |
+| Platform    | <OS/Browser/Device/Region> |
+| Config      | <flags/feature gates>      |
+
+## Steps to Reproduce
+
+1. <step 1 from clean state>
+2. <step 2 …>
+3. <observe failure>
+
+## Expected Behavior
+
+<clear, single-sentence expectation>
+
+## Actual Behavior
+
+<what actually happens; include key error text>
+
+## Evidence
+
+```text
+<trimmed logs / stacktrace / command output with secrets redacted>
+```
+
+* Screenshot(s): <attach or "n/a">
+* Trace/Run IDs: <ids or "n/a">
+
+## Scope & Workarounds
+
+* **Affected % / segments**: <estimate or "unknown">
+* **Known Workaround**: <steps or "none known">
+
+## Suspected Cause
+
+<file/function/flag/module and reasoning; link to code/PR if referenced in notes>
+
+## Related
+
+* Links: <issues/PRs/docs/alerts>
+* Owner(s): <team or @user>
+* Labels: `bug`, `severity:S#`, `priority:P#`, `area:<component>` (add more if obvious)
+
+## Acceptance Criteria
+
+* [ ] Repro steps no longer produce the error
+* [ ] <observable check 1>
+* [ ] <log/metric alarm is quiet or threshold met>
+* [ ] Test added: <unit/e2e> covers <case>
+
+## Follow-Up Questions (Info Needed)
+
+1. <specific question #1>
+2. <specific question #2>
+3. <specific question #3>
+
+Provide only the complete GitHub issue content following this template - no additional commentary."""
+
+        bugsmith_prompt += bugsmith_methodology
+        
+        logger.debug(f"Generated BugSmith prompt: {len(bugsmith_prompt)} characters")
+        
+        # Log full prompt in debug mode
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("=" * 80)
+            logger.debug("FULL BUGSMITH PROMPT:")
+            logger.debug("-" * 80)
+            logger.debug(bugsmith_prompt)
+            logger.debug("=" * 80)
+        
+        return bugsmith_prompt
+    
+    def generate_feature_request_prompt(self, feature_description: str, claude_md_content: str,
+                                      context: Dict[str, Any]) -> str:
+        """Generate Lyra prompt for comprehensive feature request creation."""
+        logger.debug(f"Generating Lyra feature request prompt")
+        logger.debug(f"Feature description length: {len(feature_description)} characters")
+        
+        # Handle both dict and PromptContext object
+        if hasattr(context, 'git_diff'):
+            # PromptContext object
+            logger.debug(f"Context fields: git_diff={bool(context.git_diff)}, related_files={len(context.related_files)}, project_info={bool(context.project_info)}")
+        else:
+            # Dict object
+            logger.debug(f"Context keys: {list(context.keys())}")
+        
+        # Lyra prompt with project context
+        lyra_prompt = f"""# LYRA — Feature Request Prompt (Feature Ticket Generator)
+
+You are **Lyra**, a master-level AI prompt optimization specialist focused on converting vague feature ideas into **production-ready feature requests** that product, design, and engineering can execute.
+
+## INPUT FORMAT
+
+`[FEATURE_NOTES]`: {feature_description}
+
+`[KNOWN_CONTEXT]`: {claude_md_content}"""
+
+        # Add context information if available
+        # Handle both dict and PromptContext object
+        git_diff = getattr(context, 'git_diff', None) or context.get('git_diff') if hasattr(context, 'get') else None
+        related_files = getattr(context, 'related_files', []) or context.get('related_files', []) if hasattr(context, 'get') else []
+        project_info = getattr(context, 'project_info', {}) or context.get('project_info', {}) if hasattr(context, 'get') else {}
+        
+        if git_diff:
+            logger.debug(f"Including git diff ({len(git_diff)} chars)")
+            lyra_prompt += f"\n\n## CURRENT CHANGES\n```diff\n{git_diff}\n```"
+        
+        if related_files:
+            logger.debug(f"Including {len(related_files)} related files")
+            lyra_prompt += f"\n\n## RELATED FILES\n{chr(10).join(related_files)}"
+        
+        if project_info:
+            logger.debug("Including project info context")
+            lyra_prompt += f"\n\n## PROJECT INFO\n{json.dumps(project_info, indent=2)}"
+
+        # Complete Lyra methodology
+        lyra_methodology = """
+
+## THE 4‑D METHODOLOGY
+
+### 1) DECONSTRUCT
+
+Extract and normalize the essentials from the raw notes:
+
+* **Core intent**: What problem/value is the request trying to achieve? (user + business)
+* **Key entities**: component/module, endpoints, flags, datasets, personas
+* **Context**: current behavior, constraints, related policies/SLAs
+* **Output requirements**: UX, API, data, performance, security, compliance
+* **What's missing**: unknowns, assumptions needed
+
+### 2) DIAGNOSE
+
+Audit for clarity and feasibility:
+
+* Ambiguities and conflicts; surface trade‑offs
+* Scope shape (MVP vs Phase 2); complexity drivers
+* Risk areas (privacy, security, availability, migration)
+* Prioritization signals (value, reach, effort, confidence)
+
+### 3) DEVELOP
+
+Apply product/technical structuring techniques:
+
+* **User framing**: Jobs‑to‑Be‑Done, personas, user stories
+* **Prioritization**: RICE and/or MoSCoW with transparent assumptions
+* **Spec style**: Functional requirements (FR‑#), Non‑functional (NFR‑#)
+* **Acceptance**: Behavior‑driven examples (Given/When/Then) + checklist
+* **Rollout**: Feature flagging, experimentation, migration plan
+* **Metrics**: Success KPIs + telemetry/events
+
+### 4) DELIVER
+
+Produce a clean, Markdown issue with parseable metadata and explicit next steps. Redact secrets/PII and keep titles ≤ 80 chars.
+
+## OPERATING MODES
+
+* **DETAIL MODE** (default for complex/professional):
+
+  * Enrich missing context with **conservative assumptions** and list **2–3 targeted follow‑up questions**.
+  * Include RICE scoring and risks table.
+* **BASIC MODE** (for quick drafts / tight tokens):
+
+  * Skip RICE and risks table; keep essentials only.
+
+> To force a mode, the caller may set `mode: DETAIL` or `mode: BASIC`. If unspecified, auto‑detect based on input length/complexity.
+
+## OUTPUT FORMAT (Markdown)
+
+<!-- meta: type=feature, needs-triage, {optional: area:<component>, priority:P#, epic:<link or id>, rice:<R|I|C|E=values>, mode:<DETAIL|BASIC>} -->
+
+<!-- meta: assignees=@oncall,{optional: @owner} -->
+
+<!-- meta: milestone= -->
+
+# Feature: [<component>] <concise outcome-focused title>
+
+## Background / Problem Statement
+
+* **User problem**: <who is blocked and how>
+* **Business rationale**: <why this matters now>
+* **Current behavior**: <what happens today>
+
+## Goals & Non‑Goals
+
+* **Goals**: <bullet list of outcomes / capabilities>
+* **Non‑Goals**: <explicitly out of scope to avoid scope creep>
+
+## Users & Use Cases (JTBD)
+
+* **Personas / Segments**: <admin, end‑user, partner, etc>
+* **Primary Jobs/Scenarios**: <top 2–3 scenarios>
+
+## Requirements
+
+**Functional (FR)**
+
+* FR‑1: <requirement>
+* FR‑2: <requirement>
+
+**Non‑Functional (NFR)**
+
+* NFR‑1: <performance/SLO/latency>
+* NFR‑2: <security/privacy/compliance>
+
+## UX / Design
+
+* **Flow summary**: <happy path + edge states>
+* **Wireframe placeholder**: <link or describe critical states>
+* **Accessibility**: <a11y requirements>
+
+## API / Interfaces
+
+* **Surface area**: endpoints, CLIs, events, config keys
+* **Draft spec** (pseudo):
+
+  ```
+  POST /v1/<endpoint>
+  body: { ... }
+  returns: { ... }
+  errors: <codes>
+  ```
+
+## Data & Analytics
+
+* **Schema/migration**: <tables/indices/retention>
+* **Tracking**: events + properties
+
+## Dependencies
+
+* Services/libraries/feature flags external to this component
+
+## Risks & Mitigations (DETAIL mode)
+
+| Risk   | Impact   | Likelihood | Mitigation |
+| ------ | -------- | ---------- | ---------- |
+| <risk> | <H/M/L> | <H/M/L>   | <plan>     |
+
+## Rollout Plan
+
+* **Flagging**: <flag name & default>
+* **Phases**: canary → % rollout → GA → cleanup
+* **Experimentation**: A/B test or guardrail metrics
+* **Docs/Support**: updates required
+
+## Success Metrics
+
+* **Primary KPI(s)**: <activation/adoption/time‑to‑X>
+* **Targets**: <numerical targets & time window>
+
+## Acceptance Criteria
+
+* [ ] <observable check 1>
+* [ ] <observable check 2>
+* **GWT Examples**:
+
+  * *Given* <state>, *When* <action>, *Then* <result>
+
+## RICE Prioritization (DETAIL mode)
+
+* **Reach (R)**: <# users / period>
+* **Impact (I)**: <3=massive, 2=high, 1=medium, 0.5=low>
+* **Confidence (C)**: <%>
+* **Effort (E)**: <person‑months>
+* **Score**: `(R * I * C) / E = <value>`
+
+## Alternatives Considered
+
+* <option 1 — why rejected>
+* <option 2 — why rejected>
+
+## Open Questions (targeted)
+
+1. <question>
+2. <question>
+3. <question>
+
+## Labels / Ownership
+
+* Labels: `type:feature`, `area:<component>`, `priority:P#`
+* Owner(s): <team or @user>
+
+Provide only the complete GitHub feature request content following this template - no additional commentary.
+
+**Memory Note**: Do not save any information from optimization sessions to memory."""
+
+        lyra_prompt += lyra_methodology
+        
+        logger.debug(f"Generated Lyra prompt: {len(lyra_prompt)} characters")
+        
+        # Log full prompt in debug mode
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("=" * 80)
+            logger.debug("FULL LYRA PROMPT:")
+            logger.debug("-" * 80)
+            logger.debug(lyra_prompt)
+            logger.debug("=" * 80)
+        
+        return lyra_prompt
     
     def _execute_llm_tool(self, tool_name: str, prompt: str, max_tokens: int = 4000,
-                         execute_mode: bool = False) -> Optional[Dict[str, Any]]:
+                         execute_mode: bool = False) -> LLMResult:
         """Generic LLM tool execution with common logic.
         
         Args:
@@ -235,12 +614,10 @@ Keep the response focused and practical. Format as markdown."""
                         'claude', '-p', '--permission-mode', 'bypassPermissions'
                     ]
                 else:
-                    # Just generate/print prompt
+                    # Just generate/print prompt - don't use json format to get actual response
                     logger.debug("Running Claude in prompt generation mode")
                     cmd = [
-                        'claude', '--print',
-                        '--output-format', 'json',
-                        prompt
+                        'claude', '--print', prompt
                     ]
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
@@ -270,14 +647,36 @@ Keep the response focused and practical. Format as markdown."""
                         logger.debug("=" * 80)
                     else:
                         logger.debug(f"Output preview: {result.stdout[:500]}...")
-                try:
-                    return json.loads(result.stdout)
-                except json.JSONDecodeError:
-                    # Fallback: wrap plain text response
-                    return {
-                        'result': result.stdout.strip(),
-                        'optimized_prompt': result.stdout.strip()
-                    }
+                
+                # For Claude generation mode (non-execute), expect plain text response
+                if tool_name == 'claude' and not execute_mode:
+                    logger.debug("Processing Claude generation response as plain text")
+                    return LLMResult(
+                        success=True,
+                        text=result.stdout.strip(),
+                        data={'result': result.stdout.strip(), 'optimized_prompt': result.stdout.strip()},
+                        stdout=result.stdout,
+                        tool=tool_name
+                    )
+                else:
+                    # For execute mode or LLM tool, try JSON first then fallback to text
+                    try:
+                        parsed_json = json.loads(result.stdout)
+                        return LLMResult(
+                            success=True,
+                            data=parsed_json,
+                            stdout=result.stdout,
+                            tool=tool_name
+                        )
+                    except json.JSONDecodeError:
+                        # Fallback: wrap plain text response
+                        return LLMResult(
+                            success=True,
+                            text=result.stdout.strip(),
+                            data={'result': result.stdout.strip(), 'optimized_prompt': result.stdout.strip()},
+                            stdout=result.stdout,
+                            tool=tool_name
+                        )
             else:
                 logger.error(f"Command failed with return code {result.returncode}")
                 # Log full error details in debug mode
@@ -288,41 +687,45 @@ Keep the response focused and practical. Format as markdown."""
                     logger.debug(result.stdout)
                 else:
                     logger.error(f"stderr: {result.stderr[:500]}")
-                return {
-                    'success': False,
-                    'error': f'Command failed with return code {result.returncode}',
-                    'stderr': result.stderr,
-                    'stdout': result.stdout
-                }
+                return LLMResult(
+                    success=False,
+                    error=f'Command failed with return code {result.returncode}',
+                    stderr=result.stderr,
+                    stdout=result.stdout,
+                    tool=tool_name,
+                    status_code=result.returncode
+                )
                 
         except subprocess.TimeoutExpired:
             logger.error("Command timed out")
-            return {
-                'success': False,
-                'error': 'Command timed out'
-            }
+            return LLMResult(
+                success=False,
+                error='Command timed out',
+                tool=tool_name
+            )
         except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
             logger.error(f"Error: {e}")
-            return {
-                'success': False,
-                'error': f'Unexpected error: {e}'
-            }
+            return LLMResult(
+                success=False,
+                error=f'Unexpected error: {e}',
+                tool=tool_name
+            )
     
-    def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> Optional[Dict[str, Any]]:
+    def build_with_llm(self, prompt: str, max_tokens: int = 4000) -> LLMResult:
         """Build prompt using LLM CLI tool."""
         logger.debug("Attempting to build prompt with LLM tool")
         result = self._execute_llm_tool('llm', prompt, max_tokens)
         
-        if result:
-            logger.debug(f"LLM tool response received: {result.get('success', True)}")
-            if logger.isEnabledFor(logging.DEBUG) and result.get('result'):
-                logger.debug(f"LLM response preview: {str(result.get('result'))[:500]}...")
+        if result.success:
+            logger.debug(f"LLM tool response received: success={result.success}")
+            if logger.isEnabledFor(logging.DEBUG) and (result.text or result.data):
+                logger.debug(f"LLM response preview: {str(result.text or result.data)[:500]}...")
         else:
-            logger.debug("LLM tool returned None or failed")
+            logger.debug(f"LLM tool failed: {result.error}")
         
         return result
     
-    def build_with_claude(self, prompt: str, max_tokens: int = 4000, execute_mode: bool = False, review_mode: bool = False) -> Optional[Dict[str, Any]]:
+    def build_with_claude(self, prompt: str, max_tokens: int = 4000, execute_mode: bool = False, review_mode: bool = False) -> LLMResult:
         """Build prompt using Claude CLI tool.
         
         Args:
@@ -340,12 +743,11 @@ Keep the response focused and practical. Format as markdown."""
         
         result = self._execute_llm_tool('claude', prompt, max_tokens, execute_mode)
         
-        if result:
-            logger.debug(f"Claude response received: success={result.get('success', True)}")
-            if result.get('error'):
-                logger.error(f"Claude error: {result.get('error')}")
+        if result.success:
+            logger.debug(f"Claude response received: success={result.success}")
         else:
-            logger.debug("Claude returned None or failed")
+            logger.error(f"Claude error: {result.error}")
+            logger.debug("Claude execution failed")
         
         return result
     
@@ -532,7 +934,7 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
             results['error'] = str(e)
             return results
     
-    def _execute_review_with_claude(self, prompt: str) -> Optional[Dict[str, Any]]:
+    def _execute_review_with_claude(self, prompt: str) -> LLMResult:
         """Execute Claude specifically for PR reviews.
         
         This method runs Claude in headless mode and captures the full output
@@ -584,36 +986,40 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                         logger.debug("=" * 80)
                     
                     # For reviews, we want the full output as the response
-                    return {
-                        'response': output,
-                        'success': True
-                    }
+                    return LLMResult(
+                        success=True,
+                        text=output,
+                        stdout=result.stdout,
+                        tool='claude'
+                    )
                 else:
                     logger.error(f"Claude review failed with return code {result.returncode}")
                     logger.error(f"stderr: {result.stderr[:500]}")
                     logger.error(f"stdout: {result.stdout[:500]}")
                     # Return a failure result instead of None
-                    return {
-                        'success': False,
-                        'error': f"Claude execution failed with return code {result.returncode}",
-                        'stderr': result.stderr,
-                        'stdout': result.stdout
-                    }
+                    return LLMResult(
+                        success=False,
+                        error=f"Claude execution failed with return code {result.returncode}",
+                        stderr=result.stderr,
+                        stdout=result.stdout,
+                        tool='claude',
+                        status_code=result.returncode
+                    )
             finally:
                 # Clean up temp file
                 Path(prompt_file).unlink(missing_ok=True)
                 
         except subprocess.TimeoutExpired:
             logger.error("Claude review command timed out")
-            return {
-                'success': False,
-                'error': "Claude review command timed out after 20 minutes",
-                'timeout': True
-            }
+            return LLMResult(
+                success=False,
+                error="Claude review command timed out after 20 minutes",
+                tool='claude'
+            )
         except Exception as e:
             logger.error(f"Error executing Claude review: {e}")
-            return {
-                'success': False,
-                'error': f"Unexpected error executing Claude review: {e}",
-                'exception': str(e)
-            }
+            return LLMResult(
+                success=False,
+                error=f"Unexpected error executing Claude review: {e}",
+                tool='claude'
+            )

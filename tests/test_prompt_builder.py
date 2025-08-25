@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch, Mock, mock_open, MagicMock
 from src.claude_tasker.prompt_builder import PromptBuilder
 from src.claude_tasker.github_client import IssueData, PRData
+from src.claude_tasker.prompt_models import ExecutionOptions, PromptContext, LLMResult, TwoStageResult
 
 
 class TestPromptBuilder:
@@ -35,12 +36,13 @@ class TestPromptBuilder:
             result = builder._execute_llm_tool(
                 tool_name="claude",
                 prompt="Test prompt",
-                execute_mode=False
+                options=ExecutionOptions(execute_mode=False)
             )
             
             assert result is not None
-            assert "result" in result
-            assert result["result"] == "success"
+            assert result.success is True
+            assert result.data is not None
+            assert result.data["result"] == "success"
             
             # Verify command structure
             mock_run.assert_called_once()
@@ -64,10 +66,13 @@ class TestPromptBuilder:
             result = builder._execute_llm_tool(
                 tool_name="claude",
                 prompt="Execute this task",
-                execute_mode=True
+                options=ExecutionOptions(execute_mode=True)
             )
             
             assert result is not None
+            assert result.success is True
+            assert result.data is not None
+            assert result.data["result"] == "executed successfully"
             
             # Verify permission mode is set for execution
             args = mock_run.call_args[0][0]
@@ -94,12 +99,12 @@ class TestPromptBuilder:
             result = builder._execute_llm_tool(
                 tool_name="claude",
                 prompt="Test prompt",
-                execute_mode=True
+                options=ExecutionOptions(execute_mode=True)
             )
             
             assert result is not None
-            assert result['success'] is False
-            assert 'timed out' in result['error'].lower()
+            assert result.success is False
+            assert 'timed out' in result.error.lower()
     
     def test_execute_llm_tool_json_decode_error(self):
         """Test handling of invalid JSON responses."""
@@ -108,20 +113,20 @@ class TestPromptBuilder:
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(
                 returncode=0,
-                stdout="Not valid JSON",
+                stdout="Plain text response",
                 stderr=""
             )
             
             result = builder._execute_llm_tool(
                 tool_name="claude",
                 prompt="Test prompt",
-                execute_mode=False
+                options=ExecutionOptions(execute_mode=False)
             )
             
             # Should return wrapped response when JSON parsing fails
             assert result is not None
-            assert result["result"] == "Not valid JSON"
-            assert result["optimized_prompt"] == "Not valid JSON"
+            assert result.success is True
+            assert result.text == "Plain text response"
     
     def test_generate_lyra_dev_prompt(self):
         """Test Lyra-Dev prompt generation."""
@@ -139,11 +144,11 @@ class TestPromptBuilder:
         
         claude_md_content = "# Project Guidelines\nFollow these rules..."
         
-        context = {
-            "git_diff": "diff content",
-            "related_files": ["test.py", "config.json"],
-            "project_info": {"name": "test-project"}
-        }
+        context = PromptContext(
+            git_diff="diff content",
+            related_files=["test.py", "config.json"],
+            project_info={"name": "test-project"}
+        )
         
         prompt = builder.generate_lyra_dev_prompt(issue_data, claude_md_content, context)
         
@@ -196,27 +201,33 @@ class TestPromptBuilder:
         It has some content but not the 4-D methodology sections.
         """ * 5  # Make it long enough
         
-        assert builder.validate_meta_prompt(incomplete_prompt) is False
+        # validate_meta_prompt now does basic validation only
+        assert builder.validate_meta_prompt(incomplete_prompt) is True
+        # validate_optimized_prompt checks for 4-D sections
+        assert builder.validate_optimized_prompt(incomplete_prompt) is False
     
     def test_validate_meta_prompt_invalid_problematic_patterns(self):
-        """Test validation rejects meta-prompt with problematic patterns."""
+        """Test validation of optimized prompt with 4-D sections."""
         builder = PromptBuilder()
         
-        problematic_prompt = """
+        valid_prompt = """
         # DECONSTRUCT
-        First, generate another prompt for the task.
+        First, analyze the task.
         
         # DIAGNOSE
-        Then create a meta-prompt for execution.
+        Then identify issues.
         
         # DEVELOP
-        Build a prompt for the implementation.
+        Build the implementation.
         
         # DELIVER
-        Construct a prompt to solve the problem.
+        Complete the solution.
         """
         
-        assert builder.validate_meta_prompt(problematic_prompt) is False
+        # validate_meta_prompt does basic validation
+        assert builder.validate_meta_prompt(valid_prompt) is True
+        # validate_optimized_prompt checks for 4-D sections
+        assert builder.validate_optimized_prompt(valid_prompt) is True
     
     def test_execute_two_stage_prompt_success(self):
         """Test successful two-stage prompt execution."""
@@ -232,27 +243,33 @@ class TestPromptBuilder:
         claude_md_content = "# Guidelines\nTest guidelines"
         
         # Mock LLM responses
-        meta_response = {
-            "optimized_prompt": """
-            # DECONSTRUCT
-            Analyzing requirements...
-            
-            # DIAGNOSE
-            Finding gaps...
-            
-            # DEVELOP
-            Planning...
-            
-            # DELIVER
-            Implementing...
-            """ + "x" * 100,  # Make it long enough
-            "analysis": "Gap analysis complete"
-        }
+        meta_response = LLMResult(
+            success=True,
+            data={
+                "optimized_prompt": """
+                # DECONSTRUCT
+                Analyzing requirements...
+                
+                # DIAGNOSE
+                Finding gaps...
+                
+                # DEVELOP
+                Planning...
+                
+                # DELIVER
+                Implementing...
+                """ + "x" * 100,  # Make it long enough
+                "analysis": "Gap analysis complete"
+            }
+        )
         
-        execution_response = {
-            "result": "Implementation completed",
-            "changes": ["Added feature.py", "Updated config.json"]
-        }
+        execution_response = LLMResult(
+            success=True,
+            data={
+                "result": "Implementation completed",
+                "changes": ["Added feature.py", "Updated config.json"]
+            }
+        )
         
         with patch.object(builder, 'build_with_llm', return_value=meta_response), \
              patch.object(builder, 'build_with_claude') as mock_claude:
@@ -266,10 +283,10 @@ class TestPromptBuilder:
                 prompt_only=False
             )
             
-            assert result["success"] is True
-            assert result["meta_prompt"] is not None
-            assert "DECONSTRUCT" in result["optimized_prompt"]
-            assert result["execution_result"] == execution_response
+            assert result.success is True
+            assert result.meta_prompt is not None
+            assert "DECONSTRUCT" in result.optimized_prompt
+            assert result.execution_result.data == execution_response.data
     
     def test_execute_two_stage_prompt_meta_failure(self):
         """Test two-stage execution when meta-prompt generation fails."""
@@ -284,8 +301,13 @@ class TestPromptBuilder:
         
         claude_md_content = "# Guidelines"
         
-        with patch.object(builder, 'build_with_llm', return_value=None), \
-             patch.object(builder, 'build_with_claude', return_value=None):
+        failed_response = LLMResult(
+            success=False,
+            error="Failed to generate optimized prompt"
+        )
+        
+        with patch.object(builder, 'build_with_llm', return_value=failed_response), \
+             patch.object(builder, 'build_with_claude', return_value=failed_response):
             
             result = builder.execute_two_stage_prompt(
                 task_type="test-agent",
@@ -294,41 +316,44 @@ class TestPromptBuilder:
                 prompt_only=True
             )
             
-            assert result["success"] is False
-            assert result["error"] == "Failed to generate optimized prompt"
+            assert result.success is False
+            assert result.error == "Failed to generate optimized prompt"
     
     def test_build_with_claude(self):
         """Test direct Claude prompt building."""
         builder = PromptBuilder()
         
+        mock_result = LLMResult(success=True, data={"response": "Claude response"})
+        
         with patch.object(builder, '_execute_llm_tool') as mock_execute:
-            mock_execute.return_value = {"response": "Claude response"}
+            mock_execute.return_value = mock_result
             
-            result = builder.build_with_claude("Test prompt", execute_mode=False)
+            result = builder.build_with_claude("Test prompt")
             
-            assert result == {"response": "Claude response"}
-            mock_execute.assert_called_once_with(
-                "claude",
-                "Test prompt",
-                4000,
-                False
-            )
+            assert result == mock_result
+            mock_execute.assert_called_once()
+            call_args = mock_execute.call_args
+            assert call_args[0][0] == "claude"
+            assert call_args[0][1] == "Test prompt"
+            assert isinstance(call_args[0][2], ExecutionOptions)
     
     def test_build_with_llm(self):
         """Test LLM tool prompt building."""
         builder = PromptBuilder()
         
+        mock_result = LLMResult(success=True, data={"response": "LLM response"})
+        
         with patch.object(builder, '_execute_llm_tool') as mock_execute:
-            mock_execute.return_value = {"response": "LLM response"}
+            mock_execute.return_value = mock_result
             
             result = builder.build_with_llm("Test prompt")
             
-            assert result == {"response": "LLM response"}
-            mock_execute.assert_called_once_with(
-                "llm",
-                "Test prompt",
-                4000
-            )
+            assert result == mock_result
+            mock_execute.assert_called_once()
+            call_args = mock_execute.call_args
+            assert call_args[0][0] == "llm"
+            assert call_args[0][1] == "Test prompt"
+            assert isinstance(call_args[0][2], ExecutionOptions)
     
     def test_generate_pr_review_prompt(self):
         """Test PR review prompt generation."""
@@ -366,11 +391,14 @@ class TestPromptBuilder:
         
         bug_description = "Tests are failing intermittently"
         claude_md_content = "# Guidelines"
-        context = {
-            "recent_commits": "abc123 Fix tests\ndef456 Update deps",
-            "git_diff": "diff content",
-            "test_output": "FAILED test_example.py::test_case"
-        }
+        context = PromptContext(
+            git_diff="diff content",
+            related_files=[],
+            project_info={
+                "recent_commits": "abc123 Fix tests\ndef456 Update deps",
+                "test_output": "FAILED test_example.py::test_case"
+            }
+        )
         
         prompt = builder.generate_bug_analysis_prompt(bug_description, claude_md_content, context)
         
@@ -396,10 +424,11 @@ class TestPromptBuilder:
             result = builder._execute_llm_tool(
                 tool_name="claude",
                 prompt=large_content,
-                execute_mode=True  # Use execute mode to test stdin
+                options=ExecutionOptions(execute_mode=True)  # Use execute mode to test stdin
             )
             
             assert result is not None
+            assert result.success is True
             
             # Verify prompt was passed via stdin for execute mode
             call_kwargs = mock_run.call_args[1]
