@@ -6,7 +6,7 @@ import tempfile
 from typing import Dict, Optional, Any
 from pathlib import Path
 from .github_client import IssueData, PRData
-from src.claude_tasker.logging_config import get_logger
+from .logging_config import get_logger
 from .prompt_models import ExecutionOptions, PromptContext, LLMResult, TwoStageResult
 import logging
 
@@ -58,7 +58,13 @@ adheres to ALL specified rules.
                                 context: Dict[str, Any]) -> str:
         """Generate Lyra-Dev framework prompt for issue implementation."""
         logger.debug(f"Generating Lyra-Dev prompt for issue #{issue_data.number}")
-        logger.debug(f"Context keys: {list(context.keys())}")
+        if hasattr(context, 'model_dump'):
+            # Handle PromptContext object
+            context_dict = context.model_dump() if hasattr(context, 'model_dump') else context.__dict__
+            logger.debug(f"Context keys: {list(context_dict.keys())}")
+        else:
+            # Handle regular dict
+            logger.debug(f"Context keys: {list(context.keys())}")
         
         prompt_parts = [
             self.lyra_dev_framework,
@@ -804,16 +810,25 @@ Provide only the complete GitHub feature request content following this template
         
         return lyra_prompt
     
-    def _execute_llm_tool(self, tool_name: str, prompt: str, max_tokens: int = 4000,
-                         execute_mode: bool = False) -> LLMResult:
+    def _execute_llm_tool(self, tool_name: str, prompt: str, max_tokens: int = None,
+                         execute_mode: bool = None, options: ExecutionOptions = None) -> LLMResult:
         """Generic LLM tool execution with common logic.
         
         Args:
             tool_name: The LLM tool to use ('llm' or 'claude')
             prompt: The prompt text
-            max_tokens: Maximum tokens for response
-            execute_mode: If True, actually execute the prompt with Claude (not just print)
+            max_tokens: Maximum tokens for response (deprecated, use options)
+            execute_mode: If True, actually execute the prompt with Claude (deprecated, use options)
+            options: ExecutionOptions object containing all execution parameters
         """
+        # Handle both old and new API styles for backward compatibility
+        if options is not None:
+            max_tokens = options.max_tokens
+            execute_mode = options.execute_mode
+        else:
+            max_tokens = max_tokens or 4000
+            execute_mode = execute_mode or False
+            
         logger.debug(f"_execute_llm_tool called with tool={tool_name}, execute_mode={execute_mode}")
         logger.debug(f"Prompt length: {len(prompt)} characters")
         
@@ -843,10 +858,10 @@ Provide only the complete GitHub feature request content following this template
                         'claude', '-p', '--permission-mode', 'bypassPermissions'
                     ]
                 else:
-                    # Just generate/print prompt - don't use json format to get actual response
+                    # Just generate/print prompt - with JSON output format for parsing
                     logger.debug("Running Claude in prompt generation mode")
                     cmd = [
-                        'claude', '--print', prompt
+                        'claude', '--print', '--output-format', 'json', prompt
                     ]
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
@@ -877,16 +892,27 @@ Provide only the complete GitHub feature request content following this template
                     else:
                         logger.debug(f"Output preview: {result.stdout[:500]}...")
                 
-                # For Claude generation mode (non-execute), expect plain text response
+                # For Claude generation mode (non-execute), try JSON first then plain text
                 if tool_name == 'claude' and not execute_mode:
-                    logger.debug("Processing Claude generation response as plain text")
-                    return LLMResult(
-                        success=True,
-                        text=result.stdout.strip(),
-                        data={'result': result.stdout.strip(), 'optimized_prompt': result.stdout.strip()},
-                        stdout=result.stdout,
-                        tool=tool_name
-                    )
+                    logger.debug("Processing Claude generation response")
+                    try:
+                        parsed_json = json.loads(result.stdout)
+                        logger.debug("Claude generation response parsed as JSON")
+                        return LLMResult(
+                            success=True,
+                            data=parsed_json,
+                            stdout=result.stdout,
+                            tool=tool_name
+                        )
+                    except json.JSONDecodeError:
+                        logger.debug("Claude generation response processed as plain text")
+                        return LLMResult(
+                            success=True,
+                            text=result.stdout.strip(),
+                            data={'result': result.stdout.strip(), 'optimized_prompt': result.stdout.strip()},
+                            stdout=result.stdout,
+                            tool=tool_name
+                        )
                 else:
                     # For execute mode or LLM tool, try JSON first then fallback to text
                     try:
@@ -1107,10 +1133,22 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                 logger.debug("Successfully generated prompt with LLM tool")
                 prompt_result = llm_result
             
-            optimized_prompt = prompt_result.get('optimized_prompt', prompt_result.get('result', ''))
+            # Extract optimized prompt from LLMResult object
+            if isinstance(prompt_result, dict):
+                optimized_prompt = prompt_result.get('optimized_prompt', prompt_result.get('result', ''))
+            else:
+                # Handle LLMResult object
+                if hasattr(prompt_result, 'data') and prompt_result.data:
+                    optimized_prompt = prompt_result.data.get('optimized_prompt', prompt_result.data.get('result', ''))
+                else:
+                    optimized_prompt = prompt_result.text or ''
+            
             if not optimized_prompt:
                 logger.error("No optimized prompt found in response")
-                logger.debug(f"Response keys: {list(prompt_result.keys())}")
+                if isinstance(prompt_result, dict):
+                    logger.debug(f"Response keys: {list(prompt_result.keys())}")
+                else:
+                    logger.debug(f"LLMResult attributes: text={bool(prompt_result.text)}, data={bool(prompt_result.data)}")
                 results['error'] = "No optimized prompt in response"
                 return results
             
@@ -1146,6 +1184,14 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                     if execution_result.get('success') is False:
                         logger.error(f"Execution failed: {execution_result.get('error')}")
                         results['error'] = execution_result.get('error')
+                        results['success'] = False
+                        return results
+                else:
+                    # Handle LLMResult object
+                    logger.debug(f"LLMResult success: {execution_result.success}")
+                    if not execution_result.success:
+                        logger.error(f"Execution failed: {execution_result.error}")
+                        results['error'] = execution_result.error
                         results['success'] = False
                         return results
                 
