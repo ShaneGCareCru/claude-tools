@@ -2,9 +2,9 @@ class ClaudeTasker < Formula
   include Language::Python::Virtualenv
 
   desc "Context-aware wrapper for Claude Code with GitHub integration"
-  homepage "https://github.com/sgleeson/claude-tools"
+  homepage "https://github.com/ShaneGCareCru/claude-tools"
   license "MIT"
-  head "https://github.com/sgleeson/claude-tools.git", branch: "main"
+  head "https://github.com/ShaneGCareCru/claude-tools.git", branch: "main"
 
   # Dependencies
   depends_on "gh"
