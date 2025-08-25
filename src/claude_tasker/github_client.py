@@ -175,14 +175,57 @@ class GitHubClient:
             return []
     
     def comment_on_issue(self, issue_number: int, comment: str) -> bool:
-        """Add comment to GitHub issue."""
+        """Add comment to GitHub issue with deduplication check."""
+        # Check for existing comments to prevent duplicates
+        existing_comments = self.get_issue_comments(issue_number)
+        
+        # Extract first few lines of the new comment for comparison
+        comment_lines = comment.strip().split('\n')
+        comment_signature = '\n'.join(comment_lines[:3]).strip() if comment_lines else comment.strip()
+        
+        # Check if a similar comment already exists
+        for existing_comment in existing_comments:
+            existing_body = existing_comment.get('body', '')
+            existing_lines = existing_body.strip().split('\n')
+            existing_signature = '\n'.join(existing_lines[:3]).strip() if existing_lines else existing_body.strip()
+            
+            # If the signature matches, it's likely a duplicate
+            if comment_signature == existing_signature and len(comment_signature) > 10:
+                logger.info(f"Skipping duplicate comment on issue #{issue_number}")
+                logger.debug(f"Existing comment signature: {existing_signature[:100]}...")
+                return True  # Return True since the comment exists
+        
         cmd = ['issue', 'comment', str(issue_number), '--body', comment]
         
         result = self._run_gh_command(cmd)
+        if result.returncode != 0:
+            logger.error(f"Failed to comment on issue #{issue_number}")
+            return False
+            
+        logger.info(f"Successfully posted new comment to issue #{issue_number}")
         return result.returncode == 0
     
     def comment_on_pr(self, pr_number: int, comment: str) -> bool:
-        """Add comment to GitHub PR."""
+        """Add comment to GitHub PR with deduplication check."""
+        # Check for existing comments to prevent duplicates
+        existing_comments = self.get_pr_comments(pr_number)
+        
+        # Extract first few lines of the new comment for comparison
+        comment_lines = comment.strip().split('\n')
+        comment_signature = '\n'.join(comment_lines[:3]).strip() if comment_lines else comment.strip()
+        
+        # Check if a similar comment already exists
+        for existing_comment in existing_comments:
+            existing_body = existing_comment.get('body', '')
+            existing_lines = existing_body.strip().split('\n')
+            existing_signature = '\n'.join(existing_lines[:3]).strip() if existing_lines else existing_body.strip()
+            
+            # If the signature matches, it's likely a duplicate
+            if comment_signature == existing_signature and len(comment_signature) > 10:
+                logger.info(f"Skipping duplicate comment on PR #{pr_number}")
+                logger.debug(f"Existing comment signature: {existing_signature[:100]}...")
+                return True  # Return True since the comment exists
+        
         cmd = ['pr', 'comment', str(pr_number), '--body', comment]
         
         result = self._run_gh_command(cmd)
@@ -192,6 +235,8 @@ class GitHubClient:
             logger.error(f"stdout: {result.stdout}")
             logger.debug(f"Comment length: {len(comment)} chars")
             return False
+        
+        logger.info(f"Successfully posted new comment to PR #{pr_number}")
         return True
     
     def create_pr(self, title: str, body: str, head: str, base: str = "main") -> Optional[str]:

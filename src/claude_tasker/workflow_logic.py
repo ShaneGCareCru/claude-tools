@@ -461,6 +461,10 @@ The issue has been reviewed and no further action is needed at this time.
             logger.debug(f"Review content length: {len(review_content)} chars")
             logger.debug(f"Review content preview: {review_content[:200]}...")
             
+            # Clean up duplicate content from Claude's response
+            review_content = self._deduplicate_review_content(review_content)
+            logger.debug(f"After deduplication: {len(review_content)} chars")
+            
             # Only add wrapper if there's actual content
             if review_content and review_content != 'Review completed':
                 review_comment = f"""## 🤖 Automated Code Review
@@ -496,6 +500,63 @@ Unable to generate detailed review. Please review the PR manually.
                 message=f"Unexpected error reviewing PR #{pr_number}",
                 error_details=str(e)
             )
+    
+    def _deduplicate_review_content(self, content: str) -> str:
+        """Remove duplicate sections from Claude's review content."""
+        if not content or len(content.strip()) < 50:
+            return content
+            
+        lines = content.split('\n')
+        if len(lines) < 10:
+            return content
+            
+        # Look for repeated sections by finding duplicate headers or blocks
+        seen_sections = set()
+        deduplicated_lines = []
+        current_section = []
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # If this looks like a header or the start of a new section
+            if (line.startswith('#') or 
+                line.startswith('**') and line.endswith('**') or
+                (line and i > 0 and not lines[i-1].strip())):
+                
+                # Check if we've seen this section before
+                section_key = line.lower().replace('*', '').replace('#', '').strip()
+                
+                if section_key and len(section_key) > 5:
+                    if section_key in seen_sections:
+                        # Skip duplicate section - find where it ends
+                        logger.debug(f"Skipping duplicate section: {section_key[:50]}...")
+                        
+                        # Skip until we find the next section or end
+                        i += 1
+                        while i < len(lines):
+                            next_line = lines[i].strip()
+                            if (next_line.startswith('#') or 
+                                next_line.startswith('**') and next_line.endswith('**') or
+                                (next_line and i < len(lines)-1 and not lines[i+1].strip())):
+                                break
+                            i += 1
+                        continue
+                    else:
+                        seen_sections.add(section_key)
+            
+            deduplicated_lines.append(lines[i])
+            i += 1
+        
+        result = '\n'.join(deduplicated_lines).strip()
+        
+        # If we removed significant content, log it
+        original_length = len(content)
+        result_length = len(result)
+        if original_length > result_length + 100:  # More than 100 chars removed
+            logger.info(f"Deduplicated review content: {original_length} -> {result_length} chars")
+            
+        return result
     
     def analyze_bug(self, bug_description: str, prompt_only: bool = False) -> WorkflowResult:
         """Analyze bug and create GitHub issue."""
