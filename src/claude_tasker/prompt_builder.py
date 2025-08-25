@@ -1037,16 +1037,8 @@ Provide only the complete GitHub feature request content following this template
             logger.debug(f"Validation failed: Meta-prompt too short ({len(meta_prompt.strip())} chars < 100)")
             return False
         
-        # Check for presence of key sections
-        required_sections = ['DECONSTRUCT', 'DIAGNOSE', 'DEVELOP', 'DELIVER']
-        missing_sections = []
-        for section in required_sections:
-            if section not in meta_prompt:
-                missing_sections.append(section)
-        
-        if missing_sections:
-            logger.debug(f"Validation failed: Missing required sections: {missing_sections}")
-            return False
+        # Basic validation only - skip 4-D section check for meta-prompts
+        # (4-D sections are checked in validate_optimized_prompt instead)
         
         # Check for problematic patterns that might cause loops
         problematic_patterns = [
@@ -1067,6 +1059,29 @@ Provide only the complete GitHub feature request content following this template
             return False
         
         logger.debug("Meta-prompt validation passed")
+        return True
+    
+    def validate_optimized_prompt(self, optimized_prompt: str) -> bool:
+        """Validate optimized prompt has all required 4-D methodology sections."""
+        logger.debug("Validating optimized prompt for 4-D methodology")
+        
+        if len(optimized_prompt.strip()) < 100:
+            logger.debug("Optimized prompt too short")
+            return False
+        
+        # Check for all 4-D sections
+        required_sections = ['DECONSTRUCT', 'DIAGNOSE', 'DEVELOP', 'DELIVER']
+        missing_sections = []
+        
+        for section in required_sections:
+            if f"# {section}" not in optimized_prompt and f"#{section}" not in optimized_prompt:
+                missing_sections.append(section)
+        
+        if missing_sections:
+            logger.debug(f"Missing required 4-D sections: {missing_sections}")
+            return False
+            
+        logger.debug("Optimized prompt validation passed")
         return True
     
     def generate_meta_prompt(self, task_type: str, task_data: Dict[str, Any],
@@ -1096,25 +1111,26 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
         return meta_prompt_template
     
     def execute_two_stage_prompt(self, task_type: str, task_data: Dict[str, Any],
-                               claude_md_content: str, prompt_only: bool = False) -> Dict[str, Any]:
+                               claude_md_content: str, prompt_only: bool = False) -> TwoStageResult:
         """Execute two-stage prompt generation and execution."""
         logger.info(f"Starting two-stage prompt execution for task type: {task_type}")
         logger.debug(f"Task data keys: {list(task_data.keys())}")
         logger.debug(f"Prompt-only mode: {prompt_only}")
         
-        results = {
-            'success': False,
-            'meta_prompt': '',
-            'optimized_prompt': '',
-            'execution_result': None,
-            'error': None
-        }
+        # Initialize result object
+        result = TwoStageResult(
+            success=False,
+            meta_prompt='',
+            optimized_prompt='',
+            execution_result=None,
+            error=None
+        )
         
         try:
             # Stage 1: Generate meta-prompt
             logger.info("Stage 1: Generating meta-prompt")
             meta_prompt = self.generate_meta_prompt(task_type, task_data, claude_md_content)
-            results['meta_prompt'] = meta_prompt
+            result.meta_prompt = meta_prompt
             
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("=" * 80)
@@ -1129,8 +1145,8 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                 logger.error("Meta-prompt validation failed")
                 logger.debug(f"Meta-prompt length: {len(meta_prompt)}")
                 logger.debug(f"Meta-prompt contains required sections: {all(s in meta_prompt for s in ['DECONSTRUCT', 'DIAGNOSE', 'DEVELOP', 'DELIVER'])}")
-                results['error'] = "Invalid meta-prompt generated"
-                return results
+                result.error = "Invalid meta-prompt generated"
+                return result
             logger.debug("Meta-prompt validation passed")
             
             # Stage 2: Generate optimized prompt
@@ -1142,8 +1158,8 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                 claude_result = self.build_with_claude(meta_prompt)
                 if not claude_result:
                     logger.error("Both LLM and Claude tools failed to generate optimized prompt")
-                    results['error'] = "Failed to generate optimized prompt"
-                    return results
+                    result.error = "Failed to generate optimized prompt"
+                    return result
                 logger.debug("Successfully generated prompt with Claude")
                 prompt_result = claude_result
             else:
@@ -1166,8 +1182,8 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                     logger.debug(f"Response keys: {list(prompt_result.keys())}")
                 else:
                     logger.debug(f"LLMResult attributes: text={bool(prompt_result.text)}, data={bool(prompt_result.data)}")
-                results['error'] = "No optimized prompt in response"
-                return results
+                result.error = "No optimized prompt in response"
+                return result
             
             logger.info(f"Optimized prompt generated: {len(optimized_prompt)} characters")
             if logger.isEnabledFor(logging.DEBUG):
@@ -1177,7 +1193,7 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                 logger.debug(optimized_prompt)
                 logger.debug("=" * 80)
             
-            results['optimized_prompt'] = optimized_prompt
+            result.optimized_prompt = optimized_prompt
             
             # Stage 3: Execute optimized prompt (if not prompt-only mode)
             if not prompt_only:
@@ -1186,45 +1202,45 @@ Return ONLY the optimized prompt text - no additional commentary or wrapper text
                 logger.debug("Decision: Proceeding with Claude execution (not prompt-only mode)")
                 
                 execution_result = self.build_with_claude(optimized_prompt, execute_mode=True)
-                results['execution_result'] = execution_result
+                result.execution_result = execution_result
                 
                 # Analyze execution result
                 if execution_result is None:
                     logger.error("Claude execution returned None")
-                    results['error'] = "Claude execution failed or timed out - consider increasing timeout or checking Claude availability"
-                    results['success'] = False
-                    return results
+                    result.error = "Claude execution failed or timed out - consider increasing timeout or checking Claude availability"
+                    result.success = False
+                    return result
                 
                 # Log execution result analysis
                 if isinstance(execution_result, dict):
                     logger.debug(f"Execution result keys: {list(execution_result.keys())}")
                     if execution_result.get('success') is False:
                         logger.error(f"Execution failed: {execution_result.get('error')}")
-                        results['error'] = execution_result.get('error')
-                        results['success'] = False
-                        return results
+                        result.error = execution_result.get('error')
+                        result.success = False
+                        return result
                 else:
                     # Handle LLMResult object
                     logger.debug(f"LLMResult success: {execution_result.success}")
                     if not execution_result.success:
                         logger.error(f"Execution failed: {execution_result.error}")
-                        results['error'] = execution_result.error
-                        results['success'] = False
-                        return results
+                        result.error = execution_result.error
+                        result.success = False
+                        return result
                 
                 logger.info("Claude execution completed successfully")
             else:
                 logger.info("Skipping Stage 3: Prompt-only mode enabled")
             
-            results['success'] = True
+            result.success = True
             logger.info(f"Two-stage prompt execution completed successfully")
-            return results
+            return result
             
         except Exception as e:
             logger.error(f"Two-stage prompt execution failed with exception: {e}")
             logger.debug("Exception details:", exc_info=True)
-            results['error'] = str(e)
-            return results
+            result.error = str(e)
+            return result
     
     def _execute_review_with_claude(self, prompt: str) -> LLMResult:
         """Execute Claude specifically for PR reviews.
