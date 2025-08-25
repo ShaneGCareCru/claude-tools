@@ -1,0 +1,400 @@
+name: TechFlow Self-Testing Framework
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of test to run'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - validators-only
+          - diagnostics-only
+      branch_strategy:
+        description: 'Branch creation strategy'
+        required: false
+        default: 'always_new'
+        type: choice
+        options:
+          - reuse
+          - always_new
+      timeout_minutes:
+        description: 'Test timeout in minutes'
+        required: false
+        default: '30'
+        type: string
+        
+  # Scheduled runs (daily at 2 AM UTC)
+  schedule:
+    - cron: '0 2 * * *'
+    
+  # Run on pushes to main that affect TechFlow files
+  push:
+    branches: [ main ]
+    paths:
+      - 'tests/techflow/**'
+      - 'tests/test_techflow_*.py'
+      - '.github/workflows/techflow-tests.yml'
+
+env:
+  PYTHON_VERSION: '3.12'
+  CLAUDE_LOG_LEVEL: 'DEBUG'
+  TEST_TIMEOUT_SECONDS: 1800  # 30 minutes
+  TEST_MAX_RETRIES: 3
+
+jobs:
+  # Unit tests for the framework itself
+  unit-tests:
+    name: TechFlow Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-mock
+          
+      - name: Install GitHub CLI
+        run: |
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh
+          
+      - name: Run TechFlow unit tests
+        run: |
+          python -m pytest tests/test_techflow_*.py -v \
+            --cov=tests.techflow \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term-missing \
+            --junit-xml=test-results/techflow-unit-results.xml
+            
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: techflow-unit-test-results
+          path: |
+            test-results/
+            htmlcov/
+            coverage.xml
+            
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          file: ./coverage.xml
+          flags: techflow-unit-tests
+          name: TechFlow Unit Tests
+
+  # Integration tests that actually run the framework
+  integration-tests:
+    name: TechFlow Integration Tests  
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    if: github.event_name != 'schedule' || github.repository_owner == 'ShaneGCareCru'
+    
+    strategy:
+      matrix:
+        branch_strategy: [reuse, always_new]
+        
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Install GitHub CLI
+        run: |
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh
+          
+      - name: Test TechFlow CLI help
+        run: |
+          python -m tests.techflow.cli --help
+          
+      - name: Test TechFlow configuration validation
+        run: |
+          # Test without GITHUB_TOKEN (should fail gracefully)
+          python -c "
+          from tests.techflow.config import TestConfig
+          config = TestConfig()
+          errors = config.validate()
+          print(f'Config validation found {len(errors)} errors (expected)')
+          assert len(errors) > 0, 'Should have validation errors without GITHUB_TOKEN'
+          print('✅ Configuration validation works correctly')
+          "
+          
+      - name: Test TechFlow validators
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Test validator functionality
+          python -c "
+          from tests.techflow.validators import ValidatorRegistry
+          from tests.techflow.config import QualityGates
+          
+          registry = ValidatorRegistry(QualityGates())
+          print('✅ ValidatorRegistry created successfully')
+          print('✅ All validators initialized')
+          "
+          
+      - name: Test TechFlow diagnostics
+        run: |
+          python -c "
+          from tests.techflow.diagnostics import DiagnosticEngine, TriageMatrix
+          from tests.techflow.config import TestConfig
+          
+          engine = DiagnosticEngine(TestConfig())
+          triage = TriageMatrix()
+          
+          print('✅ DiagnosticEngine created successfully')
+          print(f'✅ TriageMatrix has {len(triage.triage_rules)} failure patterns')
+          "
+          
+      - name: Test evidence collection
+        run: |
+          python -c "
+          import tempfile
+          from tests.techflow.evidence import EvidenceCollector
+          from tests.techflow.config import TestConfig
+          
+          with tempfile.TemporaryDirectory() as temp_dir:
+              config = TestConfig(evidence_dir=temp_dir)
+              collector = EvidenceCollector(config)
+              print('✅ EvidenceCollector created successfully')
+              print(f'✅ Evidence directory: {collector.evidence_dir}')
+          "
+
+  # Scheduled full workflow test (limited frequency)
+  full-workflow-test:
+    name: Full Workflow Test
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    if: github.event_name == 'schedule' && github.repository_owner == 'ShaneGCareCru'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Install GitHub CLI
+        run: |
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh
+          
+      - name: Make claude-tasker executable
+        run: chmod +x ./claude-tasker-py
+        
+      - name: Run full TechFlow test cycle
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLAUDE_BRANCH_STRATEGY: always_new
+          TEST_MAX_RETRIES: 2
+        run: |
+          # Run with custom bug description to avoid creating real issues
+          python -m tests.techflow.cli \
+            --bug "CI Test Bug: Automated test run from GitHub Actions - $(date)" \
+            --timeout 1800 \
+            --max-retries 2 \
+            --branch-strategy always_new \
+            --output-dir test-results/full-workflow \
+            --log-level DEBUG
+        continue-on-error: true  # Don't fail the entire workflow if test fails
+        
+      - name: Upload full workflow results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-workflow-test-results
+          path: test-results/
+          
+      - name: Generate workflow summary
+        if: always()
+        run: |
+          echo "## TechFlow Full Workflow Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -d "test-results/full-workflow" ]; then
+            echo "✅ Test results directory created" >> $GITHUB_STEP_SUMMARY
+            
+            # Count artifacts
+            if [ -d "test-results/full-workflow/run-*/artifacts" ]; then
+              ARTIFACT_COUNT=$(find test-results/full-workflow/run-*/artifacts -name "*.json" 2>/dev/null | wc -l)
+              echo "📄 Artifacts generated: $ARTIFACT_COUNT" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            # Check for reports
+            if [ -d "test-results/full-workflow/run-*/reports" ]; then
+              echo "📊 Reports generated successfully" >> $GITHUB_STEP_SUMMARY
+              ls test-results/full-workflow/run-*/reports/ | while read report; do
+                echo "  - $report" >> $GITHUB_STEP_SUMMARY
+              done
+            fi
+          else
+            echo "❌ No test results generated" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Quality metrics and performance analysis
+  quality-analysis:
+    name: Quality Analysis
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit safety flake8 mypy
+          
+      - name: Run security analysis
+        run: |
+          echo "## Security Analysis" >> $GITHUB_STEP_SUMMARY
+          bandit -r tests/techflow/ -f json -o security-report.json || true
+          if [ -f security-report.json ]; then
+            ISSUES=$(cat security-report.json | python -c "import sys, json; data=json.load(sys.stdin); print(len(data.get('results', [])))")
+            echo "🔒 Security issues found: $ISSUES" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+      - name: Run dependency security check
+        run: |
+          safety check --json --output safety-report.json || true
+          if [ -f safety-report.json ]; then
+            echo "🛡️ Dependency security check completed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+      - name: Run code quality analysis
+        run: |
+          echo "## Code Quality" >> $GITHUB_STEP_SUMMARY
+          
+          # Flake8 for style issues
+          flake8 tests/techflow/ --count --statistics --output-file=flake8-report.txt || true
+          if [ -f flake8-report.txt ]; then
+            STYLE_ISSUES=$(tail -n 1 flake8-report.txt | awk '{print $1}')
+            echo "📝 Style issues: ${STYLE_ISSUES:-0}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+      - name: Calculate framework metrics
+        run: |
+          echo "## Framework Metrics" >> $GITHUB_STEP_SUMMARY
+          
+          # Count files and lines
+          PYTHON_FILES=$(find tests/techflow/ -name "*.py" | wc -l)
+          TOTAL_LINES=$(find tests/techflow/ -name "*.py" -exec wc -l {} + | tail -n 1 | awk '{print $1}')
+          TEST_FILES=$(find tests/ -name "test_techflow_*.py" | wc -l)
+          
+          echo "📁 Python files: $PYTHON_FILES" >> $GITHUB_STEP_SUMMARY
+          echo "📄 Total lines of code: $TOTAL_LINES" >> $GITHUB_STEP_SUMMARY
+          echo "🧪 Test files: $TEST_FILES" >> $GITHUB_STEP_SUMMARY
+          
+          # Count classes and functions
+          CLASSES=$(grep -r "^class " tests/techflow/ | wc -l)
+          FUNCTIONS=$(grep -r "def " tests/techflow/ | wc -l)
+          
+          echo "🏗️ Classes: $CLASSES" >> $GITHUB_STEP_SUMMARY
+          echo "⚙️ Functions: $FUNCTIONS" >> $GITHUB_STEP_SUMMARY
+          
+      - name: Upload quality reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-analysis-reports
+          path: |
+            security-report.json
+            safety-report.json
+            flake8-report.txt
+
+  # Notification on failure
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, quality-analysis]
+    if: failure() && (github.event_name == 'schedule' || github.event_name == 'push')
+    
+    steps:
+      - name: Create failure issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const title = `TechFlow Tests Failed - ${new Date().toISOString().split('T')[0]}`;
+            const body = `
+            ## TechFlow Test Failure Report
+            
+            **Workflow:** ${context.workflow}
+            **Run ID:** ${context.runId}
+            **Event:** ${context.eventName}
+            **Ref:** ${context.ref}
+            **SHA:** ${context.sha}
+            
+            **Failed Jobs:**
+            ${context.payload.workflow_run?.jobs?.filter(job => job.conclusion === 'failure').map(job => `- ${job.name}`).join('\n') || 'See workflow details'}
+            
+            **Action Required:**
+            1. Check the [workflow run](${context.payload.workflow_run?.html_url}) for details
+            2. Review test failures and fix issues
+            3. Close this issue once resolved
+            
+            **Auto-generated by TechFlow CI**
+            `;
+            
+            // Check if similar issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['techflow-failure', 'automated'],
+              state: 'open'
+            });
+            
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['techflow-failure', 'automated', 'bug']
+              });
+            }
