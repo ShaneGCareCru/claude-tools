@@ -3,6 +3,9 @@ class ClaudeTasker < Formula
 
   desc "Context-aware wrapper for Claude Code with GitHub integration"
   homepage "https://github.com/ShaneGCareCru/claude-tools"
+  url "https://github.com/ShaneGCareCru/claude-tools.git",
+      revision: "c39bc61b2ee2f07bb8adb3cdaf2e78b37e08c6d9"
+  version "1.0.0"
   license "MIT"
   head "https://github.com/ShaneGCareCru/claude-tools.git", branch: "main"
 
@@ -16,9 +19,6 @@ class ClaudeTasker < Formula
   # For development, install via: pip install -r requirements.txt
 
   def install
-    # Only HEAD installation is supported for now
-    odie "This formula only supports --HEAD installation. Use: brew install --HEAD claude-tasker" unless build.head?
-
     # Pre-flight dependency validation
     validate_dependencies
 
@@ -60,7 +60,7 @@ class ClaudeTasker < Formula
 
       # Set up Python environment
       export PYTHONPATH="#{libexec}/lib/python#{Language::Python.major_minor_version("python3")}/site-packages:$PYTHONPATH"
-      export CLAUDE_TASKER_VERSION="HEAD"
+      export CLAUDE_TASKER_VERSION="#{version}"
 
       # Execute with proper error handling
       exec "#{libexec}/bin/python3" "#{libexec}/claude-tasker-py" "$@"
@@ -142,6 +142,10 @@ class ClaudeTasker < Formula
   test do
     # Integration test suite
     ENV["CLAUDE_TASKER_TEST_MODE"] = "1"
+
+    # Test version output and basic functionality
+    version_output = shell_output("#{bin}/claude-tasker --version 2>&1")
+    assert_match "1.0.0", version_output
 
     # Test help command (should work without Claude CLI in test mode)
     help_output = shell_output("#{bin}/claude-tasker --help 2>&1")

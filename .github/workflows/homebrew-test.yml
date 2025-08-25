@@ -57,8 +57,8 @@ jobs:
     
     - name: Test formula installation
       run: |
-        # Install HEAD from the temporary tap
-        brew install --HEAD --build-from-source --verbose homebrew/test-tap/claude-tasker
+        # Install from the temporary tap
+        brew install --build-from-source --verbose homebrew/test-tap/claude-tasker
     
     - name: Test formula functionality
       run: |
@@ -85,7 +85,7 @@ jobs:
     - name: Test reinstallation
       run: |
         # Test that it can be reinstalled cleanly
-        brew install --HEAD --build-from-source homebrew/test-tap/claude-tasker
+        brew install --build-from-source homebrew/test-tap/claude-tasker
         claude-tasker --help
 
   test-formula-head:
