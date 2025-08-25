@@ -117,40 +117,40 @@ class TestValidateArguments:
     
     def test_validate_no_action(self):
         """Test validation when no action specified."""
-        args = Mock(issue=None, bug=None, review_pr=None)
+        args = Mock(issue=None, bug=None, review_pr=None, feature=None, timeout=10)
         result = validate_arguments(args)
-        assert result == "Must specify an issue number, --review-pr, or --bug"
+        assert result == "Must specify an issue number, --review-pr, --bug, or --feature"
     
     def test_validate_multiple_actions(self):
         """Test validation when multiple actions specified."""
-        args = Mock(issue='42', bug='bug desc', review_pr=None)
+        args = Mock(issue='42', bug='bug desc', review_pr=None, feature=None, timeout=10)
         result = validate_arguments(args)
         assert result == "Error: Cannot specify multiple actions simultaneously"
     
     def test_validate_invalid_issue_format(self):
         """Test validation with invalid issue format."""
-        args = Mock(issue='invalid', bug=None, review_pr=None, timeout=10)
+        args = Mock(issue='invalid', bug=None, review_pr=None, feature=None, timeout=10)
         with patch('src.claude_tasker.cli.parse_issue_range', return_value=(None, None)):
             result = validate_arguments(args)
             assert "Invalid issue number format" in result
     
     def test_validate_invalid_pr_format(self):
         """Test validation with invalid PR format."""
-        args = Mock(issue=None, bug=None, review_pr='invalid', timeout=10)
+        args = Mock(issue=None, bug=None, review_pr='invalid', feature=None, timeout=10)
         with patch('src.claude_tasker.cli.parse_pr_range', return_value=(None, None)):
             result = validate_arguments(args)
             assert "Invalid PR number format" in result
     
     def test_validate_negative_timeout(self):
         """Test validation with negative timeout."""
-        args = Mock(issue='42', bug=None, review_pr=None, timeout=-1)
+        args = Mock(issue='42', bug=None, review_pr=None, feature=None, timeout=-1)
         result = validate_arguments(args)
         assert "Invalid timeout value" in result
     
     def test_validate_success(self):
         """Test successful validation."""
         args = Mock(
-            issue='42', bug=None, review_pr=None, timeout=10,
+            issue='42', bug=None, review_pr=None, feature=None, timeout=10,
             project=None, base_branch=None, auto_pr_review=False, 
             prompt_only=False
         )

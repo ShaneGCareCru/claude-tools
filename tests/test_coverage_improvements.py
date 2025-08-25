@@ -154,8 +154,8 @@ class TestPromptBuilderCoverageImprovements:
                 result = builder._execute_llm_tool('llm', 'test prompt')
         
         assert result is not None
-        assert result['success'] is False
-        assert 'timed out' in result['error'].lower()
+        assert result.success is False
+        assert 'timed out' in result.error.lower()
     
     def test_execute_llm_tool_generic_exception(self):
         """Test _execute_llm_tool with generic exception."""
@@ -166,8 +166,8 @@ class TestPromptBuilderCoverageImprovements:
                 result = builder._execute_llm_tool('llm', 'test prompt')
         
         assert result is not None
-        assert result['success'] is False
-        assert 'unexpected' in result['error'].lower()
+        assert result.success is False
+        assert 'unexpected' in result.error.lower()
     
     def test_build_with_claude_cleanup_on_error(self):
         """Test build_with_claude cleanup on error."""
@@ -184,7 +184,7 @@ class TestPromptBuilderCoverageImprovements:
         
         # Verify cleanup was attempted
         assert result is not None
-        assert result['success'] is False
+        assert result.success is False
 
 
 class TestWorkspaceManagerCoverageImprovements:
