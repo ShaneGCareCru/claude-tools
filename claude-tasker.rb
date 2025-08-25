@@ -9,11 +9,11 @@ class ClaudeTasker < Formula
   license "MIT"
   head "https://github.com/sgleeson/claude-tools.git", branch: "main"
 
-  # Minimum dependency versions
+  # Dependencies
   depends_on "python@3.11" # Requires 3.11+ for modern typing support
-  depends_on "gh" => ">=2.0"
-  depends_on "jq" => ">=1.6"
-  depends_on "git" => ">=2.30"
+  depends_on "gh"
+  depends_on "jq"
+  depends_on "git"
   
   # Conflicts and compatibility
   conflicts_with "claude-tasker-dev", because: "both provide claude-tasker binary"
@@ -25,7 +25,7 @@ class ClaudeTasker < Formula
   end
 
   resource "pydantic" do
-    url "https://files.pythonhosted.org/packages/df/e4/ba44652d562cbf0bf320e0f3810206149c8a4e99cdbf66da82e97ab53a15/pydantic-2.10.4.tar.gz"
+    url "https://files.pythonhosted.org/packages/70/7e/fb60e6fee04d0ef8f15e4e01ff187a196fa976eb0f0ab524af4599e5754c/pydantic-2.10.4.tar.gz"
     sha256 "82f12d6f4738ecb5b35b01ad57bb29233bfe405e15314d5e86e805785521ba41"
   end
 

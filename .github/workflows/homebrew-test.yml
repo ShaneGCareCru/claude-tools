@@ -44,9 +44,7 @@ jobs:
         # Install required tools (gh, jq, git are usually present)
         brew install gh jq
         
-        # Install Python 3.11+ if not present, force link to avoid conflicts
-        brew install python@3.11
-        brew link --overwrite python@3.11 || true
+        # Python@3.11 will be installed as a dependency of our formula
     
     - name: Validate formula syntax
       run: |
