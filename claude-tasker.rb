@@ -18,16 +18,15 @@ class ClaudeTasker < Formula
   def install
     # Only HEAD installation is supported for now
     odie "This formula only supports --HEAD installation. Use: brew install --HEAD claude-tasker" unless build.head?
-    
+
     # Pre-flight dependency validation
     validate_dependencies
 
     # Create virtual environment and install dependencies
     venv = virtualenv_create(libexec, "python3.11")
-    
+
     # Install requirements manually
     venv.pip_install_and_link buildpath, link_manpages: false
-    
     # Install specific dependencies
     dependencies = %w[typing-extensions pydantic python-json-logger colorlog rich]
     dependencies.each do |dep|
