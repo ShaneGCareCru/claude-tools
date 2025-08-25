@@ -8,6 +8,7 @@ from unittest.mock import patch, Mock, mock_open, call
 
 from src.claude_tasker.workflow_logic import WorkflowLogic, WorkflowResult
 from src.claude_tasker.github_client import IssueData, PRData
+from src.claude_tasker.prompt_models import LLMResult
 
 
 class TestIntegration:
@@ -127,9 +128,10 @@ class TestIntegration:
             mock_git_diff.return_value = "diff --git a/test.py b/test.py\\n-old line\\n+new line"
             
             mock_analysis_prompt.return_value = "Generated bug analysis prompt"
-            mock_build.return_value = {
-                'result': 'Bug analysis completed: Intermittent test failures likely due to race conditions'
-            }
+            mock_build.return_value = LLMResult(
+                success=True,
+                text='Bug analysis completed: Intermittent test failures likely due to race conditions'
+            )
             
             # Execute bug analysis workflow
             bug_description = "Tests are failing intermittently"

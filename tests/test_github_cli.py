@@ -449,7 +449,9 @@ class TestGitHubClient:
         """Test successful issue commenting."""
         client = GitHubClient()
         
-        with patch.object(client, '_run_gh_command') as mock_run:
+        with patch.object(client, 'get_issue_comments') as mock_comments, \
+             patch.object(client, '_run_gh_command') as mock_run:
+            mock_comments.return_value = []  # No existing comments
             mock_run.return_value = Mock(returncode=0)
             
             result = client.comment_on_issue(123, "Test comment")
@@ -474,7 +476,9 @@ class TestGitHubClient:
         """Test successful PR commenting."""
         client = GitHubClient()
         
-        with patch.object(client, '_run_gh_command') as mock_run:
+        with patch.object(client, 'get_pr_comments') as mock_comments, \
+             patch.object(client, '_run_gh_command') as mock_run:
+            mock_comments.return_value = []  # No existing comments
             mock_run.return_value = Mock(returncode=0)
             
             result = client.comment_on_pr(456, "PR looks good!")

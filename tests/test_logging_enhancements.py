@@ -14,6 +14,7 @@ from src.claude_tasker.logging_config import (
 )
 from src.claude_tasker.prompt_builder import PromptBuilder
 from src.claude_tasker.workflow_logic import WorkflowLogic
+from src.claude_tasker.prompt_models import LLMResult
 from src.claude_tasker.github_client import IssueData, PRData
 
 
@@ -354,10 +355,10 @@ class TestResponseProcessingLogging:
     def test_build_with_claude_response_analysis(self, prompt_builder, caplog):
         """Test Claude response analysis logging."""
         with patch.object(prompt_builder, '_execute_llm_tool') as mock_execute:
-            mock_execute.return_value = {
-                'success': False,
-                'error': 'Test error message'
-            }
+            mock_execute.return_value = LLMResult(
+                success=False,
+                error='Test error message'
+            )
             
             with caplog.at_level(logging.DEBUG):
                 result = prompt_builder.build_with_claude('test prompt')
