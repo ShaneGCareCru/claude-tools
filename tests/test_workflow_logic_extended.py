@@ -8,6 +8,7 @@ import os
 
 from src.claude_tasker.workflow_logic import WorkflowLogic, WorkflowResult
 from src.claude_tasker.github_client import IssueData
+from src.claude_tasker.prompt_models import TwoStageResult, LLMResult
 
 
 class TestWorkflowLogicExtended:
@@ -91,7 +92,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
-        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = {'success': False, 'error': 'Prompt failed'}
+        mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
+        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = TwoStageResult(success=False, error='Prompt failed')
         
         mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         result = workflow.process_single_issue(42, prompt_only=False)
@@ -114,7 +116,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
-        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = {'success': True, 'optimized_prompt': 'Test prompt'}
+        mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
+        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = TwoStageResult(success=True, optimized_prompt='Test prompt')
         
         mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         
@@ -138,7 +141,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
-        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = {'success': True, 'optimized_prompt': 'Test prompt'}
+        mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
+        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = TwoStageResult(success=True, optimized_prompt='Test prompt')
         mock_dependencies['workspace_manager'].has_changes_to_commit.return_value = False
         mock_dependencies['github_client'].comment_on_issue.return_value = True
         
@@ -163,7 +167,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
-        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = {'success': False, 'error': 'Claude execution failed'}
+        mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
+        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = TwoStageResult(success=False, error='Claude execution failed')
         
         mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         result = workflow.process_single_issue(42, prompt_only=False)
@@ -186,7 +191,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
-        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = {'success': True, 'optimized_prompt': 'Test prompt'}
+        mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
+        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = TwoStageResult(success=True, optimized_prompt='Test prompt')
         mock_dependencies['workspace_manager'].has_changes_to_commit.return_value = True
         mock_dependencies['workspace_manager'].commit_changes.return_value = False
         
@@ -211,7 +217,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
-        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = {'success': True, 'optimized_prompt': 'Test prompt'}
+        mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
+        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = TwoStageResult(success=True, optimized_prompt='Test prompt')
         mock_dependencies['workspace_manager'].has_changes_to_commit.return_value = True
         mock_dependencies['workspace_manager'].commit_changes.return_value = True
         mock_dependencies['workspace_manager'].push_branch.return_value = False
@@ -237,7 +244,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
-        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = {'success': True, 'optimized_prompt': 'Test prompt'}
+        mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
+        mock_dependencies['prompt_builder'].execute_two_stage_prompt.return_value = TwoStageResult(success=True, optimized_prompt='Test prompt')
         mock_dependencies['workspace_manager'].has_changes_to_commit.return_value = True
         mock_dependencies['workspace_manager'].commit_changes.return_value = True
         mock_dependencies['workspace_manager'].push_branch.return_value = True
@@ -272,7 +280,7 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].get_commit_log.return_value = "commit log"
         mock_dependencies['workspace_manager'].get_git_diff.return_value = "git diff"
         mock_dependencies['prompt_builder'].generate_bug_analysis_prompt.return_value = "Bug prompt"
-        mock_dependencies['prompt_builder'].build_with_claude.return_value = {'result': 'Analysis complete'}
+        mock_dependencies['prompt_builder'].build_with_claude.return_value = LLMResult(success=True, text='Analysis complete')
         
         mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         
@@ -368,10 +376,10 @@ class TestWorkflowLogicExtended:
         mock_dependencies['github_client'].get_pr.return_value = pr_data
         mock_dependencies['github_client'].get_pr_diff.return_value = "diff content"
         mock_dependencies['prompt_builder'].generate_pr_review_prompt.return_value = "Review prompt"
-        mock_dependencies['prompt_builder'].build_with_claude.return_value = {
-            'success': True,
-            'response': 'Review complete'
-        }
+        mock_dependencies['prompt_builder'].build_with_claude.return_value = LLMResult(
+            success=True,
+            text='Review complete'
+        )
         mock_dependencies['github_client'].comment_on_pr.return_value = False
         
         mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
