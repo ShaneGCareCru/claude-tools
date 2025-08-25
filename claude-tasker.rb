@@ -4,7 +4,6 @@ class ClaudeTasker < Formula
   desc "Context-aware wrapper for Claude Code with GitHub integration"
   homepage "https://github.com/ShaneGCareCru/claude-tools"
   url "https://github.com/ShaneGCareCru/claude-tools/archive/refs/tags/v1.0.0.tar.gz"
-  version "1.0.0"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "MIT"
   head "https://github.com/ShaneGCareCru/claude-tools.git", branch: "main"
@@ -60,7 +59,7 @@ class ClaudeTasker < Formula
 
       # Set up Python environment
       export PYTHONPATH="#{libexec}/lib/python#{Language::Python.major_minor_version("python3")}/site-packages:$PYTHONPATH"
-      export CLAUDE_TASKER_VERSION="#{version}"
+      export CLAUDE_TASKER_VERSION="1.0.0"
 
       # Execute with proper error handling
       exec "#{libexec}/bin/python3" "#{libexec}/claude-tasker-py" "$@"
