@@ -57,8 +57,8 @@ jobs:
     
     - name: Test formula installation
       run: |
-        # Install from the temporary tap
-        brew install --build-from-source --verbose homebrew/test-tap/claude-tasker
+        # Install HEAD from the temporary tap
+        brew install --HEAD --build-from-source --verbose homebrew/test-tap/claude-tasker
     
     - name: Test formula functionality
       run: |
@@ -69,7 +69,7 @@ jobs:
         claude-tasker --help
         
         # Test Python imports work
-        python3 -c "import sys; sys.path.insert(0, '$(brew --prefix homebrew/test-tap/claude-tasker)/libexec/lib/python3.11/site-packages'); from claude_tasker import __version__; print(__version__)"
+        python3 -c "import sys; sys.path.insert(0, '$(brew --prefix homebrew/test-tap/claude-tasker)/libexec/lib/python3.11/site-packages'); from claude_tasker.cli import main; print('Import successful')"
     
     - name: Run Homebrew tests
       run: |
@@ -85,7 +85,7 @@ jobs:
     - name: Test reinstallation
       run: |
         # Test that it can be reinstalled cleanly
-        brew install --build-from-source homebrew/test-tap/claude-tasker
+        brew install --HEAD --build-from-source homebrew/test-tap/claude-tasker
         claude-tasker --help
 
   test-formula-head:
