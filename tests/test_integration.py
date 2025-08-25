@@ -149,9 +149,9 @@ class TestIntegration:
             call_args = mock_analysis_prompt.call_args[0]
             assert bug_description in call_args[0]  # bug description
             
-            context_arg = mock_analysis_prompt.call_args[0][2]  # context dict
-            assert 'recent_commits' in context_arg
-            assert 'git_diff' in context_arg
+            context_arg = mock_analysis_prompt.call_args[0][2]  # PromptContext object
+            assert 'recent_commits' in context_arg.project_info
+            assert context_arg.git_diff is not None
     
     def test_range_processing_with_timeout(self):
         """Test range processing with timeout between tasks."""

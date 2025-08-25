@@ -364,8 +364,8 @@ class TestResponseProcessingLogging:
                 result = prompt_builder.build_with_claude('test prompt')
                 
                 assert "Building with Claude: execute_mode=False" in caplog.text
-                assert "Claude response received: success=False" in caplog.text
                 assert "Claude error: Test error message" in caplog.text
+                assert "Claude execution failed" in caplog.text
 
 
 class TestIntegrationLogging:

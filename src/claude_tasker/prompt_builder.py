@@ -73,18 +73,35 @@ adheres to ALL specified rules.
             f"\n## Project Guidelines (CLAUDE.md)\n{claude_md_content}",
         ]
         
-        if context.get('git_diff'):
-            logger.debug(f"Including git diff ({len(context['git_diff'])} chars)")
-            prompt_parts.append(f"\n## Current Changes\n```diff\n{context['git_diff']}\n```")
-        
-        if context.get('related_files'):
-            logger.debug(f"Including {len(context['related_files'])} related files")
-            prompt_parts.append(f"\n## Related Files\n{chr(10).join(context['related_files'])}")
-        
-        if context.get('project_info'):
-            logger.debug("Including project info context")
-            prompt_parts.append(
-                f"\n## Project Context\n{json.dumps(context['project_info'], indent=2)}")
+        # Handle both dict and PromptContext objects
+        if hasattr(context, 'model_dump'):
+            # PromptContext object
+            if context.git_diff:
+                logger.debug(f"Including git diff ({len(context.git_diff)} chars)")
+                prompt_parts.append(f"\n## Current Changes\n```diff\n{context.git_diff}\n```")
+            
+            if context.related_files:
+                logger.debug(f"Including {len(context.related_files)} related files")
+                prompt_parts.append(f"\n## Related Files\n{chr(10).join(context.related_files)}")
+            
+            if context.project_info:
+                logger.debug("Including project info context")
+                prompt_parts.append(
+                    f"\n## Project Context\n{json.dumps(context.project_info, indent=2)}")
+        else:
+            # Regular dict
+            if context.get('git_diff'):
+                logger.debug(f"Including git diff ({len(context['git_diff'])} chars)")
+                prompt_parts.append(f"\n## Current Changes\n```diff\n{context['git_diff']}\n```")
+            
+            if context.get('related_files'):
+                logger.debug(f"Including {len(context['related_files'])} related files")
+                prompt_parts.append(f"\n## Related Files\n{chr(10).join(context['related_files'])}")
+            
+            if context.get('project_info'):
+                logger.debug("Including project info context")
+                prompt_parts.append(
+                    f"\n## Project Context\n{json.dumps(context['project_info'], indent=2)}")
         
         final_prompt = "\n".join(prompt_parts)
         logger.debug(f"Generated Lyra-Dev prompt: {len(final_prompt)} characters")
