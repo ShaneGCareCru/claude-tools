@@ -10,6 +10,7 @@ from .environment_validator import EnvironmentValidator
 from .github_client import GitHubClient
 from .workspace_manager import WorkspaceManager
 from .prompt_builder import PromptBuilder
+from .prompt_models import PromptContext, ExecutionOptions
 from .pr_body_generator import PRBodyGenerator
 from src.claude_tasker.logging_config import get_logger
 
@@ -229,7 +230,7 @@ class WorkflowLogic:
                     message="Prompt generation failed",
                     issue_number=issue_number,
                     branch_name=branch_name,
-                    error_details=prompt_result.get('error')
+                    error_details=prompt_result.error
                 )
             
             # If prompt-only mode, return success
@@ -436,8 +437,8 @@ The issue has been reviewed and no further action is needed at this time.
                 )
             
             # Check if the result indicates a failure
-            if not review_result.get('success', True):
-                error_msg = review_result.get('error', 'Unknown error')
+            if not review_result.success:
+                error_msg = review_result.error or 'Unknown error'
                 logger.error(f"Review generation failed for PR #{pr_number}: {error_msg}")
                 print(f"[ERROR] Review generation failed for PR #{pr_number}: {error_msg}")
                 return WorkflowResult(
@@ -446,7 +447,7 @@ The issue has been reviewed and no further action is needed at this time.
                     error_details=error_msg
                 )
             
-            if not review_result.get('response'):
+            if not review_result.text:
                 logger.error(f"Review result missing 'response' field for PR #{pr_number}")
                 logger.debug(f"Review result keys: {review_result.keys()}")
                 print(f"[ERROR] Review result missing 'response' field for PR #{pr_number}")
@@ -457,7 +458,7 @@ The issue has been reviewed and no further action is needed at this time.
                 )
             
             # Get the actual review content
-            review_content = review_result.get('response', 'Review completed')
+            review_content = review_result.text or 'Review completed'
             logger.debug(f"Review content length: {len(review_content)} chars")
             logger.debug(f"Review content preview: {review_content[:200]}...")
             
@@ -571,10 +572,13 @@ Unable to generate detailed review. Please review the PR manually.
                 )
             
             # Gather context
-            context = {
-                'recent_commits': self.workspace_manager.get_commit_log(self.base_branch, 5),
-                'git_diff': self.workspace_manager.get_git_diff()
-            }
+            context = PromptContext(
+                git_diff=self.workspace_manager.get_git_diff(),
+                related_files=[],
+                project_info={
+                    'recent_commits': self.workspace_manager.get_commit_log(self.base_branch, 5)
+                }
+            )
             
             # Generate bug analysis prompt
             analysis_prompt = self.prompt_builder.generate_bug_analysis_prompt(
@@ -584,20 +588,33 @@ Unable to generate detailed review. Please review the PR manually.
             # Execute analysis - try Claude first, then fallback to LLM
             analysis_result = self.prompt_builder.build_with_claude(analysis_prompt)
             
-            if not analysis_result:
+            if not analysis_result.success:
                 # Fallback to LLM tool
                 analysis_result = self.prompt_builder.build_with_llm(analysis_prompt)
                 
-            if not analysis_result:
+            if not analysis_result.success:
                 return WorkflowResult(
                     success=False,
-                    message="Failed to analyze bug"
+                    message="Failed to analyze bug",
+                    error_details=analysis_result.error
                 )
             
             # If not prompt-only, create GitHub issue
             if not prompt_only:
                 issue_title = f"Bug: {bug_description[:50]}..."
-                issue_body = analysis_result.get('result', analysis_result.get('optimized_prompt', bug_description))
+                
+                # Debug: log what we got from analysis_result
+                logger.debug(f"Analysis result success: {analysis_result.success}")
+                logger.debug(f"Analysis result data: {analysis_result.data}")
+                logger.debug(f"Analysis result text: {analysis_result.text and len(analysis_result.text)}")
+                if analysis_result.text:
+                    logger.debug(f"Analysis result text preview: {analysis_result.text[:200]}...")
+                
+                issue_body = (
+                    (analysis_result.data or {}).get('result') or 
+                    analysis_result.text or 
+                    bug_description
+                )
                 
                 issue_url = self.github_client.create_issue(
                     title=issue_title,
