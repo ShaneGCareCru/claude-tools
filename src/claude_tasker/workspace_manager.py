@@ -6,6 +6,7 @@ import time
 from typing import Tuple, Optional, List
 from pathlib import Path
 from src.claude_tasker.logging_config import get_logger
+from src.claude_tasker.branch_manager import BranchManager, BranchStrategy
 
 logger = get_logger(__name__)
 
@@ -13,9 +14,24 @@ logger = get_logger(__name__)
 class WorkspaceManager:
     """Manages workspace hygiene, Git operations, and branch management."""
     
-    def __init__(self, cwd: str = "."):
+    def __init__(self, cwd: str = ".", branch_strategy: str = "reuse"):
+        """Initialize workspace manager.
+        
+        Args:
+            cwd: Current working directory
+            branch_strategy: Branch strategy - "always_new", "reuse", or "reuse_or_fail"
+        """
         self.cwd = Path(cwd).resolve()
         self.interactive_mode = self._is_interactive()
+        
+        # Initialize branch manager with specified strategy
+        strategy_map = {
+            "always_new": BranchStrategy.ALWAYS_NEW,
+            "reuse": BranchStrategy.REUSE_WHEN_POSSIBLE,
+            "reuse_or_fail": BranchStrategy.REUSE_OR_FAIL
+        }
+        strategy = strategy_map.get(branch_strategy, BranchStrategy.REUSE_WHEN_POSSIBLE)
+        self.branch_manager = BranchManager(strategy)
     
     def _is_interactive(self) -> bool:
         """Determine if running in interactive mode."""
@@ -141,6 +157,36 @@ class WorkspaceManager:
         print(f"Changes stashed successfully: {stash_message}")
         print("You can restore them later with: git stash pop")
         return True
+    
+    def smart_branch_for_issue(self, issue_number: int, base_branch: str = None) -> Tuple[bool, str, str]:
+        """Intelligently reuse existing branch or create new one for issue.
+        
+        Returns:
+            Tuple of (success, branch_name, action) where action is "reused", "created", or "switched"
+        """
+        if base_branch is None:
+            base_branch = self.detect_main_branch()
+        
+        logger.info(f"Smart branch selection for issue #{issue_number}")
+        
+        # Use branch manager for intelligent reuse
+        success, branch_name, action = self.branch_manager.reuse_or_create_branch(
+            issue_number, base_branch
+        )
+        
+        if success:
+            logger.info(f"Branch '{branch_name}' {action} for issue #{issue_number}")
+            
+            # Optional: Clean up old branches if we created a new one
+            if action == "created" and os.getenv('CLAUDE_CLEANUP_OLD_BRANCHES', 'false').lower() == 'true':
+                deleted_count = self.branch_manager.cleanup_old_issue_branches(
+                    issue_number, 
+                    keep_count=int(os.getenv('CLAUDE_KEEP_BRANCHES', '3'))
+                )
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} old branches")
+        
+        return success, branch_name, action
     
     def create_timestamped_branch(self, issue_number: int, base_branch: str = None) -> Tuple[bool, str]:
         """Create a new timestamped branch for issue processing."""
