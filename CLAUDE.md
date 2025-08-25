@@ -15,6 +15,7 @@ This is a collection of enhanced tools for working with Claude Code in GitHub wo
 - **GitHub integration**: Direct interaction with issues, PRs, and comments via `gh` CLI
 - **Status verification protocol**: Detects false completion claims
 - **AUDIT-AND-IMPLEMENT workflow**: Audits gaps before implementation
+- **Intelligent branch management**: Reuses existing PR branches, configurable strategies
 - **Comprehensive testing**: Unit tests, integration tests, and mocking support
 
 ### File Structure
@@ -49,6 +50,12 @@ This is a collection of enhanced tools for working with Claude Code in GitHub wo
 
 # Interactive mode (default is headless)
 ./claude-tasker-py <issue_number> --interactive
+
+# Reuse existing PR branches (default behavior)
+./claude-tasker-py <issue_number> --branch-strategy reuse
+
+# Always create new branches
+./claude-tasker-py <issue_number> --no-smart-branching
 ```
 
 ### Script Options
@@ -76,12 +83,14 @@ Install with: `pip install -r requirements.txt`
 - `python-dotenv` - Environment variable management
 
 ### Git Workflow
-- Always creates timestamped branches: `issue-<number>-<timestamp>`
+- Smart branch management: Reuses existing PR branches or creates new timestamped ones
+- Branch naming: `issue-<number>-<timestamp>`
 - Validates branch names match the issue being processed
 - Commits with standardized messages following conventional commit format
 - Only creates PRs when actual code changes are made
 - Gracefully handles "already complete" cases
 - Warns users when branch/issue number mismatches occur
+- Optional automatic cleanup of old branches
 
 ### Testing
 - Run tests with: `pytest tests/`

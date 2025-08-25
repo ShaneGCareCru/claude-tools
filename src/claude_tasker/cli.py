@@ -4,6 +4,7 @@ import argparse
 import sys
 import re
 import time
+import os
 from typing import List, Optional
 from pathlib import Path
 
@@ -125,6 +126,22 @@ Examples:
         type=int,
         metavar='NUM',
         help='GitHub project number for context'
+    )
+    
+    # Branch management options
+    parser.add_argument(
+        '--branch-strategy',
+        choices=['always_new', 'reuse', 'reuse_or_fail'],
+        default='reuse',
+        help='Branch creation strategy: always_new (create new branches), '
+             'reuse (reuse existing PR branches when possible), '
+             'reuse_or_fail (must reuse existing branch)'
+    )
+    
+    parser.add_argument(
+        '--no-smart-branching',
+        action='store_true',
+        help='Disable smart branching (always create new branches)'
     )
     
     parser.add_argument(
@@ -249,12 +266,21 @@ def main() -> int:
     if args.dry_run:
         args.prompt_only = True
     
+    # Set environment variable for smart branching
+    if args.no_smart_branching:
+        os.environ['CLAUDE_SMART_BRANCHING'] = 'false'
+        branch_strategy = 'always_new'
+    else:
+        os.environ['CLAUDE_SMART_BRANCHING'] = 'true'
+        branch_strategy = args.branch_strategy
+    
     # Initialize workflow logic
     workflow = WorkflowLogic(
         timeout_between_tasks=args.timeout,
         interactive_mode=args.interactive,
         coder=args.coder,
-        base_branch=args.base_branch
+        base_branch=args.base_branch,
+        branch_strategy=branch_strategy
     )
     
     try:

@@ -34,15 +34,17 @@ class WorkflowLogic:
                  timeout_between_tasks: float = 10.0,
                  interactive_mode: bool = None,
                  coder: str = "claude",
-                 base_branch: str = None):
+                 base_branch: str = None,
+                 branch_strategy: str = "reuse"):
         self.timeout_between_tasks = timeout_between_tasks
         self.interactive_mode = interactive_mode if interactive_mode is not None else os.isatty(0)
         self.coder = coder
+        self.branch_strategy = branch_strategy
         
         # Initialize components
         self.env_validator = EnvironmentValidator()
         self.github_client = GitHubClient()
-        self.workspace_manager = WorkspaceManager()
+        self.workspace_manager = WorkspaceManager(branch_strategy=branch_strategy)
         self.prompt_builder = PromptBuilder()
         self.pr_body_generator = PRBodyGenerator()
         
@@ -162,20 +164,48 @@ class WorkflowLogic:
                 )
             logger.debug("Workspace hygiene completed successfully")
             
-            # Create timestamped branch
-            logger.info(f"Creating timestamped branch for issue #{issue_number}")
-            logger.debug(f"Base branch: {self.base_branch}")
-            branch_created, branch_name = self.workspace_manager.create_timestamped_branch(
-                issue_number, self.base_branch
-            )
-            if not branch_created:
-                logger.error(f"Failed to create branch: {branch_name}")
-                return WorkflowResult(
-                    success=False,
-                    message=f"Failed to create branch: {branch_name}",
-                    issue_number=issue_number
+            # Smart branch selection - reuse existing or create new
+            use_smart_branching = os.getenv('CLAUDE_SMART_BRANCHING', 'true').lower() == 'true'
+            
+            if use_smart_branching:
+                logger.info(f"Using smart branch selection for issue #{issue_number}")
+                logger.debug(f"Base branch: {self.base_branch}")
+                branch_success, branch_name, action = self.workspace_manager.smart_branch_for_issue(
+                    issue_number, self.base_branch
                 )
-            logger.info(f"Created branch: {branch_name}")
+                
+                if branch_success:
+                    if action == "reused":
+                        logger.info(f"♻️  Reusing existing branch: {branch_name}")
+                        print(f"♻️  Reusing existing branch: {branch_name}")
+                    elif action == "created":
+                        logger.info(f"🌿 Created new branch: {branch_name}")
+                        print(f"🌿 Created new branch: {branch_name}")
+                    elif action == "switched":
+                        logger.info(f"🔄 Already on branch: {branch_name}")
+                        print(f"🔄 Already on branch: {branch_name}")
+                else:
+                    logger.error(f"Failed to setup branch: {branch_name}")
+                    return WorkflowResult(
+                        success=False,
+                        message=f"Failed to setup branch: {branch_name}",
+                        issue_number=issue_number
+                    )
+            else:
+                # Fallback to old behavior - always create new timestamped branch
+                logger.info(f"Creating timestamped branch for issue #{issue_number}")
+                logger.debug(f"Base branch: {self.base_branch}")
+                branch_created, branch_name = self.workspace_manager.create_timestamped_branch(
+                    issue_number, self.base_branch
+                )
+                if not branch_created:
+                    logger.error(f"Failed to create branch: {branch_name}")
+                    return WorkflowResult(
+                        success=False,
+                        message=f"Failed to create branch: {branch_name}",
+                        issue_number=issue_number
+                    )
+                logger.info(f"Created branch: {branch_name}")
             
             # Generate and execute prompt using two-stage execution
             task_data = {
