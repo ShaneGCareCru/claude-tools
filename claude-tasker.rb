@@ -36,7 +36,7 @@ class ClaudeTasker < Formula
   end
 
   resource "python-json-logger" do
-    url "https://files.pythonhosted.org/packages/3e/25/a1eb8dcf0bf6240b3be82508eebe67f5ac088241e5e42327ad8a72dc7a4e/python_json_logger-3.2.1.tar.gz"
+    url "https://files.pythonhosted.org/packages/e3/c4/358cd13daa1d912ef795010897a483ab2f0b41c9ea1b35235a8b2f7d15a7/python_json_logger-3.2.1.tar.gz"
     sha256 "8eb0554ea17cb75b05d2848bc14fb02fbdbd9d6972120781b974380bfa162008"
   end
 
