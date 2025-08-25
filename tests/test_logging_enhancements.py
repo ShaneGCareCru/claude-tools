@@ -173,11 +173,11 @@ class TestPromptBuilderLogging:
             assert prompt_builder.validate_meta_prompt("short") is False
             assert "Validation failed: Meta-prompt too short" in caplog.text
             
-            # Test invalid prompt - missing sections
+            # Test invalid prompt - problematic patterns (since 4-D sections not checked in meta-prompt validation)
             caplog.clear()
-            invalid_prompt = "x" * 200
-            assert prompt_builder.validate_meta_prompt(invalid_prompt) is False
-            assert "Missing required sections" in caplog.text
+            problematic_prompt = "x" * 200 + " generate another prompt please"
+            assert prompt_builder.validate_meta_prompt(problematic_prompt) is False
+            assert "Found problematic patterns" in caplog.text
     
     @patch('subprocess.run')
     def test_execute_llm_tool_logging(self, mock_run, prompt_builder, caplog):
@@ -413,7 +413,7 @@ class TestIntegrationLogging:
                     assert "Stage 1: Generating meta-prompt" in log_output
                     assert "Stage 2: Generating optimized prompt" in log_output
                     assert "Stage 3: Executing optimized prompt with Claude" in log_output
-                    assert results['success'] is True
+                    assert results.success is True
                 finally:
                     logger.removeHandler(handler)
 

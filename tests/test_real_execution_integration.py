@@ -212,8 +212,8 @@ class TestRealExecutionIntegration:
         )
         
         # Should succeed but not execute
-        assert result_prompt_only['success']
-        assert result_prompt_only['execution_result'] is None
+        assert result_prompt_only.success
+        assert result_prompt_only.execution_result is None
         
         # File should not exist
         test_file = real_git_repo / "test.txt"
@@ -347,7 +347,7 @@ class TestExecutionModeValidation:
             )
             
             # Verify the execution succeeded and build_with_claude was called with execute_mode=True
-            assert result['success'] is True
+            assert result.success is True
             
             # Find the call with execute_mode=True
             execute_call = None
