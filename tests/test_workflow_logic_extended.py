@@ -266,8 +266,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].get_commit_log.return_value = "commit log"
         mock_dependencies['workspace_manager'].get_git_diff.return_value = "git diff"
         mock_dependencies['prompt_builder'].generate_bug_analysis_prompt.return_value = "Bug analysis prompt"
-        mock_dependencies['prompt_builder'].build_with_claude.return_value = None
-        mock_dependencies['prompt_builder'].build_with_llm.return_value = None
+        mock_dependencies['prompt_builder'].build_with_claude.return_value = LLMResult(success=False, error='Build failed')
+        mock_dependencies['prompt_builder'].build_with_llm.return_value = LLMResult(success=False, error='Build failed')
         
         mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         result = workflow.analyze_bug("Something is broken", prompt_only=False)
@@ -294,8 +294,8 @@ class TestWorkflowLogicExtended:
         mock_dependencies['workspace_manager'].get_commit_log.return_value = "commit log"
         mock_dependencies['workspace_manager'].get_git_diff.return_value = "git diff"
         mock_dependencies['prompt_builder'].generate_bug_analysis_prompt.return_value = "Bug prompt"
-        mock_dependencies['prompt_builder'].build_with_claude.return_value = None
-        mock_dependencies['prompt_builder'].build_with_llm.return_value = None
+        mock_dependencies['prompt_builder'].build_with_claude.return_value = LLMResult(success=False, error='Build failed')
+        mock_dependencies['prompt_builder'].build_with_llm.return_value = LLMResult(success=False, error='Build failed')
         
         mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}
         result = workflow.analyze_bug("Something is broken", prompt_only=False)
@@ -305,11 +305,11 @@ class TestWorkflowLogicExtended:
     
     def test_analyze_bug_issue_creation_failure(self, workflow, mock_dependencies):
         """Test analyze_bug when issue creation fails."""
-        mock_dependencies['prompt_builder'].build_bug_analysis_prompt.return_value = "Bug prompt"
-        mock_dependencies['prompt_builder'].execute_claude_with_prompt.return_value = {
-            'success': True,
-            'response': 'Analysis complete'
-        }
+        mock_dependencies['workspace_manager'].get_commit_log.return_value = "commit log"
+        mock_dependencies['workspace_manager'].get_git_diff.return_value = "git diff"
+        mock_dependencies['prompt_builder'].generate_bug_analysis_prompt.return_value = "Bug prompt"
+        mock_dependencies['prompt_builder'].build_with_claude.return_value = LLMResult(success=True, text='Analysis complete')
+        mock_dependencies['prompt_builder'].build_with_llm.return_value = LLMResult(success=True, text='Analysis complete')
         mock_dependencies['github_client'].create_issue.return_value = None
         
         mock_dependencies['env_validator'].validate_all_dependencies.return_value = {'valid': True}

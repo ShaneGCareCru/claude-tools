@@ -13,6 +13,7 @@ from src.claude_tasker.logging_config import (
     should_log_full_content, SensitiveDataFilter
 )
 from src.claude_tasker.prompt_builder import PromptBuilder
+from src.claude_tasker.prompt_models import TwoStageResult, LLMResult
 from src.claude_tasker.workflow_logic import WorkflowLogic
 from src.claude_tasker.prompt_models import LLMResult
 from src.claude_tasker.github_client import IssueData, PRData
@@ -267,10 +268,10 @@ class TestWorkflowLogicLogging:
                             mock_create_branch.return_value = (True, "issue-123-12345")
                             
                             with patch.object(workflow_logic.prompt_builder, 'execute_two_stage_prompt') as mock_prompt:
-                                mock_prompt.return_value = {
-                                    'success': True,
-                                    'optimized_prompt': 'test prompt'
-                                }
+                                mock_prompt.return_value = TwoStageResult(
+                                    success=True,
+                                    optimized_prompt='test prompt'
+                                )
                                 
                                 with caplog.at_level(logging.INFO):
                                     result = workflow_logic.process_single_issue(123, prompt_only=True)
@@ -387,7 +388,7 @@ class TestIntegrationLogging:
             mock_llm.return_value = {'result': 'optimized prompt'}
             
             with patch.object(prompt_builder, 'build_with_claude') as mock_claude:
-                mock_claude.return_value = {'success': True, 'result': 'execution result'}
+                mock_claude.return_value = LLMResult(success=True, data={'result': 'execution result'})
                 
                 # Use a StringIO to capture logs
                 import logging
