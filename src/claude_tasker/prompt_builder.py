@@ -877,21 +877,19 @@ Provide only the complete GitHub feature request content following this template
                     # Just generate/print prompt - with JSON output format for parsing
                     logger.debug("Running Claude in prompt generation mode")
                     cmd = [
-                        'claude', '--print', '--output-format', 'json', prompt
+                        'claude', '--print', '--output-format', 'json',
+                        '--append-system-prompt', 'Return ONLY valid markdown for the GitHub issue. No JSON objects, no code fences around the response.'
                     ]
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
             
             # Run with timeout to prevent hanging
-            # Pass prompt via stdin for both llm and claude execute mode
-            if tool_name == 'llm' or (tool_name == 'claude' and execute_mode):
-                logger.debug(f"Running command: {' '.join(cmd)}")
-                logger.debug(f"Passing prompt via stdin ({len(prompt)} chars)")
-                # 20 minutes for execution, 2 minutes for generation
-                timeout_val = 1200 if execute_mode else 120
-                result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False, timeout=timeout_val)
-            else:
-                result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
+            # Always pass prompt via stdin for all tools
+            logger.debug(f"Running command: {' '.join(cmd)}")
+            logger.debug(f"Passing prompt via stdin ({len(prompt)} chars)")
+            # 30 minutes for execution, 10 minutes for generation
+            timeout_val = 1800 if execute_mode else 600
+            result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False, timeout=timeout_val)
             
             if result.returncode == 0:
                 if execute_mode:
