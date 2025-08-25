@@ -644,3 +644,89 @@ Unable to generate detailed review. Please review the PR manually.
                 message="Unexpected error during bug analysis",
                 error_details=str(e)
             )
+    
+    def analyze_feature(self, feature_description: str, prompt_only: bool = False) -> WorkflowResult:
+        """Analyze feature request and create GitHub issue."""
+        try:
+            # Validate environment
+            env_valid, env_msg = self.validate_environment(prompt_only)
+            if not env_valid:
+                return WorkflowResult(
+                    success=False,
+                    message="Environment validation failed",
+                    error_details=env_msg
+                )
+            
+            # Gather context
+            context = PromptContext(
+                git_diff=self.workspace_manager.get_git_diff(),
+                related_files=[],
+                project_info={
+                    'recent_commits': self.workspace_manager.get_commit_log(self.base_branch, 5)
+                }
+            )
+            
+            # Generate feature analysis prompt
+            analysis_prompt = self.prompt_builder.generate_feature_analysis_prompt(
+                feature_description, self.claude_md_content, context
+            )
+            
+            # Execute analysis - try Claude first, then fallback to LLM
+            analysis_result = self.prompt_builder.build_with_claude(analysis_prompt)
+            
+            if not analysis_result.success:
+                # Fallback to LLM tool
+                analysis_result = self.prompt_builder.build_with_llm(analysis_prompt)
+                
+            if not analysis_result.success:
+                return WorkflowResult(
+                    success=False,
+                    message="Failed to analyze feature request",
+                    error_details=analysis_result.error
+                )
+            
+            # If not prompt-only, create GitHub issue
+            if not prompt_only:
+                issue_title = f"Feature: {feature_description[:50]}..."
+                
+                # Debug: log what we got from analysis_result
+                logger.debug(f"Analysis result success: {analysis_result.success}")
+                logger.debug(f"Analysis result data: {analysis_result.data}")
+                logger.debug(f"Analysis result text: {analysis_result.text and len(analysis_result.text)}")
+                if analysis_result.text:
+                    logger.debug(f"Analysis result text preview: {analysis_result.text[:200]}...")
+                
+                issue_body = (
+                    (analysis_result.data or {}).get('result') or 
+                    analysis_result.text or 
+                    feature_description
+                )
+                
+                issue_url = self.github_client.create_issue(
+                    title=issue_title,
+                    body=issue_body,
+                    labels=['enhancement']
+                )
+                
+                if issue_url:
+                    return WorkflowResult(
+                        success=True,
+                        message=f"Feature analysis completed and issue created: {issue_url}"
+                    )
+                else:
+                    return WorkflowResult(
+                        success=False,
+                        message="Failed to create GitHub issue"
+                    )
+            else:
+                return WorkflowResult(
+                    success=True,
+                    message="Feature analysis completed"
+                )
+        
+        except Exception as e:
+            return WorkflowResult(
+                success=False,
+                message="Unexpected error during feature analysis",
+                error_details=str(e)
+            )

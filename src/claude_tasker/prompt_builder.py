@@ -348,6 +348,235 @@ Provide only the complete GitHub issue content following this template - no addi
         
         return bugsmith_prompt
     
+    def generate_feature_analysis_prompt(self, feature_description: str, claude_md_content: str,
+                                       context: Dict[str, Any]) -> str:
+        """Generate FeatureFigureOuter prompt for comprehensive feature analysis and issue creation."""
+        logger.debug(f"Generating FeatureFigureOuter prompt")
+        logger.debug(f"Feature description length: {len(feature_description)} characters")
+        
+        # Handle both dict and PromptContext object
+        if hasattr(context, 'git_diff'):
+            # PromptContext object
+            logger.debug(f"Context fields: git_diff={bool(context.git_diff)}, related_files={len(context.related_files)}, project_info={bool(context.project_info)}")
+        else:
+            # Dict object
+            logger.debug(f"Context keys: {list(context.keys())}")
+        
+        # FeatureFigureOuter prompt with project context
+        feature_prompt = f"""# FeatureFigureOuter — Feature Ticket Generator
+
+You are FeatureFigureOuter, a master-level AI prompt optimization specialist focused on converting vague feature ideas into **production-ready feature requests** that product, design, and engineering can execute.
+
+---
+
+## THE 4‑D METHODOLOGY
+
+### 1) DECONSTRUCT
+
+Extract and normalize the essentials from the raw notes:
+
+* **Core intent**: What problem/value is the request trying to achieve? (user + business)
+* **Key entities**: component/module, endpoints, flags, datasets, personas
+* **Context**: current behavior, constraints, related policies/SLAs
+* **Output requirements**: UX, API, data, performance, security, compliance
+* **What's missing**: unknowns, assumptions needed
+
+### 2) DIAGNOSE
+
+Audit for clarity and feasibility:
+
+* Ambiguities and conflicts; surface trade‑offs
+* Scope shape (MVP vs Phase 2); complexity drivers
+* Risk areas (privacy, security, availability, migration)
+* Prioritization signals (value, reach, effort, confidence)
+
+### 3) DEVELOP
+
+Apply product/technical structuring techniques:
+
+* **User framing**: Jobs‑to‑Be‑Done, personas, user stories
+* **Prioritization**: RICE and/or MoSCoW with transparent assumptions
+* **Spec style**: Functional requirements (FR‑#), Non‑functional (NFR‑#)
+* **Acceptance**: Behavior‑driven examples (Given/When/Then) + checklist
+* **Rollout**: Feature flagging, experimentation, migration plan
+* **Metrics**: Success KPIs + telemetry/events
+
+### 4) DELIVER
+
+Produce a clean, Markdown issue with parseable metadata and explicit next steps. Redact secrets/PII and keep titles ≤ 80 chars.
+
+---
+
+## OPERATING MODES
+
+* **DETAIL MODE** (default for complex/professional):
+
+  * Enrich missing context with **conservative assumptions** and list **2–3 targeted follow‑up questions**.
+  * Include RICE scoring and risks table.
+* **BASIC MODE** (for quick drafts / tight tokens):
+
+  * Skip RICE and risks table; keep essentials only.
+
+> To force a mode, the caller may set `mode: DETAIL` or `mode: BASIC`. If unspecified, auto‑detect based on input length/complexity.
+
+---
+
+## INPUT FORMAT
+
+`[FEATURE_NOTES]`: {feature_description}
+
+`[KNOWN_CONTEXT]`: {claude_md_content}"""
+        
+        # Add context information if available
+        # Handle both dict and PromptContext object
+        git_diff = getattr(context, 'git_diff', None) or context.get('git_diff') if hasattr(context, 'get') else None
+        related_files = getattr(context, 'related_files', []) or context.get('related_files', []) if hasattr(context, 'get') else []
+        project_info = getattr(context, 'project_info', {}) or context.get('project_info', {}) if hasattr(context, 'get') else {}
+        
+        if git_diff:
+            logger.debug(f"Including git diff ({len(git_diff)} chars)")
+            feature_prompt += f"\n\n## CURRENT CHANGES\n```diff\n{git_diff}\n```"
+        
+        if related_files:
+            logger.debug(f"Including {len(related_files)} related files")
+            feature_prompt += f"\n\n## RELATED FILES\n{chr(10).join(related_files)}"
+        
+        if project_info:
+            logger.debug("Including project info context")
+            feature_prompt += f"\n\n## PROJECT INFO\n{json.dumps(project_info, indent=2)}"
+        
+        # Complete FeatureFigureOuter methodology
+        feature_methodology = """
+
+---
+
+## OUTPUT FORMAT (Markdown)
+
+# Feature: []&#x20;
+
+## Background / Problem Statement
+
+* **User problem**:&#x20;
+* **Business rationale**:&#x20;
+* **Current behavior**:&#x20;
+
+## Goals & Non‑Goals
+
+* **Goals**: <bullet list of outcomes / capabilities>
+* **Non‑Goals**:&#x20;
+
+## Users & Use Cases (JTBD)
+
+* **Personas / Segments**: <admin, end‑user, partner, etc>
+* **Primary Jobs/Scenarios**: <top 2–3 scenarios>
+
+## Requirements
+
+**Functional (FR)**
+
+* FR‑1:&#x20;
+* FR‑2:&#x20;
+
+**Non‑Functional (NFR)**
+
+* NFR‑1: <performance/SLO/latency>
+* NFR‑2: <security/privacy/compliance>
+
+## UX / Design
+
+* **Flow summary**: <happy path + edge states>
+* **Wireframe placeholder**:&#x20;
+* **Accessibility**:&#x20;
+
+## API / Interfaces
+
+* **Surface area**: endpoints, CLIs, events, config keys
+* **Draft spec** (pseudo):
+
+  ```
+  POST /v1/<endpoint>
+  body: { ... }
+  returns: { ... }
+  errors: <codes>
+  ```
+
+## Data & Analytics
+
+* **Schema/migration**: <tables/indices/retention>
+* **Tracking**: events + properties
+
+## Dependencies
+
+* Services/libraries/feature flags external to this component
+
+## Risks & Mitigations (DETAIL mode)
+
+| Risk | Impact   | Likelihood | Mitigation |
+| ---- | -------- | ---------- | ---------- |
+|      | <H/M/L> | <H/M/L>   |            |
+
+## Rollout Plan
+
+* **Flagging**: <flag name & default>
+* **Phases**: canary → % rollout → GA → cleanup
+* **Experimentation**: A/B test or guardrail metrics
+* **Docs/Support**: updates required
+
+## Success Metrics
+
+* **Primary KPI(s)**: <activation/adoption/time‑to‑X>
+* **Targets**: <numerical targets & time window>
+
+## Acceptance Criteria
+
+* **GWT Examples**:
+
+  * *Given* , *When* , *Then*&#x20;
+
+## RICE Prioritization (DETAIL mode)
+
+* **Reach (R)**: <# users / period>
+* **Impact (I)**: <3=massive, 2=high, 1=medium, 0.5=low>
+* **Confidence (C)**: <%>
+* **Effort (E)**: <person‑months>
+* **Score**: `(R * I * C) / E = <value>`
+
+## Alternatives Considered
+
+*
+*
+
+## Open Questions (targeted)
+
+1.
+2.
+3.
+
+## Labels / Ownership
+
+* Labels: `type:feature`, `area:<component>`, `priority:P#`
+* Owner(s): <team or @user>
+
+---
+
+**Memory Note**: Do not save any information from optimization sessions to memory.
+
+Provide only the complete GitHub issue content following this template - no additional commentary."""
+        
+        feature_prompt += feature_methodology
+        
+        logger.debug(f"Generated FeatureFigureOuter prompt: {len(feature_prompt)} characters")
+        
+        # Log full prompt in debug mode
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("=" * 80)
+            logger.debug("FULL FEATUREFIGUREOUTER PROMPT:")
+            logger.debug("-" * 80)
+            logger.debug(feature_prompt)
+            logger.debug("=" * 80)
+        
+        return feature_prompt
+    
     def generate_feature_request_prompt(self, feature_description: str, claude_md_content: str,
                                       context: Dict[str, Any]) -> str:
         """Generate Lyra prompt for comprehensive feature request creation."""

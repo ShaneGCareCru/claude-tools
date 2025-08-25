@@ -64,10 +64,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         description='Enhanced Claude Task Runner - Context-aware wrapper for Claude Code',
         epilog="""
 Examples:
-  claude-tasker 123                    # Process issue #123
-  claude-tasker 123-125               # Process issues #123 through #125
-  claude-tasker --review-pr 456       # Review PR #456
-  claude-tasker --bug "Test failure"  # Analyze bug and create issue
+  claude-tasker 123                        # Process issue #123
+  claude-tasker 123-125                   # Process issues #123 through #125
+  claude-tasker --review-pr 456           # Review PR #456
+  claude-tasker --bug "Test failure"      # Analyze bug and create issue
+  claude-tasker --feature "Add CSV export" # Analyze feature and create issue
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -91,6 +92,13 @@ Examples:
         '--bug',
         metavar='DESCRIPTION',
         help='Analyze bug and create issue'
+    )
+    
+    # Feature analysis
+    parser.add_argument(
+        '--feature',
+        metavar='DESCRIPTION',
+        help='Analyze feature request and create issue'
     )
     
     # Execution options
@@ -171,11 +179,11 @@ Examples:
 def validate_arguments(args: argparse.Namespace) -> Optional[str]:
     """Validate argument combinations."""
     # Must specify exactly one main action
-    actions = [args.issue, args.review_pr, args.bug]
+    actions = [args.issue, args.review_pr, args.bug, args.feature]
     active_actions = [action for action in actions if action is not None]
     
     if len(active_actions) == 0:
-        return "Must specify an issue number, --review-pr, or --bug"
+        return "Must specify an issue number, --review-pr, --bug, or --feature"
     
     if len(active_actions) > 1:
         return "Error: Cannot specify multiple actions simultaneously"
@@ -203,6 +211,10 @@ def validate_arguments(args: argparse.Namespace) -> Optional[str]:
     # Validate bug description
     if args.bug is not None and not args.bug.strip():
         return "Error: Bug description cannot be empty"
+    
+    # Validate feature description
+    if args.feature is not None and not args.feature.strip():
+        return "Error: Feature description cannot be empty"
     
     # Validate base branch
     if args.base_branch and not args.base_branch.strip():
@@ -347,6 +359,12 @@ def main() -> int:
             result = workflow.analyze_bug(args.bug, args.prompt_only)
             results = [result]
         
+        elif args.feature:
+            # Analyze feature
+            print(f"✨ Analyzing feature: {args.feature}")
+            result = workflow.analyze_feature(args.feature, args.prompt_only)
+            results = [result]
+        
         # Print individual results
         for result in results:
             if result.success:
@@ -356,7 +374,9 @@ def main() -> int:
                 if result.branch_name:
                     print(f"   Branch: {result.branch_name}")
             else:
-                logger.error(f"Bug analysis failed: {result.message}")
+                # Determine the analysis type for error message
+                analysis_type = "Feature analysis" if args.feature else "Bug analysis" if args.bug else "Analysis"
+                logger.error(f"{analysis_type} failed: {result.message}")
                 if result.error_details:
                     logger.error(f"Error details: {result.error_details}")
                 print(f"❌ {result.message}")
