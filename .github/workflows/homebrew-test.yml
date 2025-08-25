@@ -1,0 +1,136 @@
+name: Test Homebrew Formula
+
+on:
+  push:
+    paths:
+      - 'claude-tasker.rb'
+      - 'HOMEBREW_INSTALL.md'
+      - '.github/workflows/homebrew-test.yml'
+  pull_request:
+    paths:
+      - 'claude-tasker.rb'
+      - 'HOMEBREW_INSTALL.md'
+      - '.github/workflows/homebrew-test.yml'
+
+jobs:
+  test-formula:
+    name: Test Formula on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-13]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Homebrew
+      id: set-up-homebrew
+      uses: Homebrew/actions/setup-homebrew@master
+    
+    - name: Cache Homebrew
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/Library/Caches/Homebrew
+          ~/Library/Logs/Homebrew
+        key: ${{ runner.os }}-homebrew-${{ hashFiles('claude-tasker.rb') }}
+        restore-keys: |
+          ${{ runner.os }}-homebrew-
+    
+    - name: Install dependencies
+      run: |
+        # Install required tools (gh, jq, git are usually present)
+        brew install gh jq
+        
+        # Install Python 3.11+ if not present
+        brew install python@3.11
+    
+    - name: Validate formula syntax
+      run: |
+        brew audit --strict --online ./claude-tasker.rb
+    
+    - name: Test formula installation
+      run: |
+        # Test local installation
+        brew install --build-from-source --verbose ./claude-tasker.rb
+    
+    - name: Test formula functionality
+      run: |
+        # Test basic commands (without requiring Claude CLI for CI)
+        claude-tasker --help
+        
+        # Test version output
+        claude-tasker --version
+        
+        # Test Python imports work
+        python3 -c "import sys; sys.path.insert(0, '$(brew --prefix claude-tasker)/libexec/lib/python3.11/site-packages'); from claude_tasker import __version__; print(__version__)"
+    
+    - name: Run Homebrew tests
+      run: |
+        brew test claude-tasker
+    
+    - name: Test formula uninstallation
+      run: |
+        brew uninstall claude-tasker
+        
+        # Verify cleanup
+        ! command -v claude-tasker
+    
+    - name: Test reinstallation
+      run: |
+        # Test that it can be reinstalled cleanly
+        brew install --build-from-source ./claude-tasker.rb
+        claude-tasker --help
+
+  test-formula-head:
+    name: Test HEAD Formula
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Homebrew
+      uses: Homebrew/actions/setup-homebrew@master
+    
+    - name: Install HEAD version
+      run: |
+        brew install --HEAD --build-from-source ./claude-tasker.rb
+    
+    - name: Test HEAD functionality
+      run: |
+        claude-tasker --help
+        claude-tasker --version
+
+  validate-documentation:
+    name: Validate Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Check documentation completeness
+      run: |
+        # Verify HOMEBREW_INSTALL.md exists and contains required sections
+        grep -q "Installation Methods" HOMEBREW_INSTALL.md
+        grep -q "Troubleshooting" HOMEBREW_INSTALL.md
+        grep -q "Usage Examples" HOMEBREW_INSTALL.md
+        
+        # Check that formula file exists
+        test -f claude-tasker.rb
+        
+        # Validate that documentation mentions correct command name
+        grep -q "claude-tasker" HOMEBREW_INSTALL.md
+    
+    - name: Validate markdown syntax
+      uses: DavidAnson/markdownlint-action@v1
+      with:
+        files: 'HOMEBREW_INSTALL.md'
+        config: |
+          {
+            "MD013": false,
+            "MD033": false
+          }

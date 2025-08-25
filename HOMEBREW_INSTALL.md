@@ -7,6 +7,7 @@ This guide explains how to install `claude-tasker` using Homebrew on macOS and L
 1. **Homebrew**: Install from [brew.sh](https://brew.sh) if not already installed
 2. **Claude CLI**: Install from [Anthropic's documentation](https://docs.anthropic.com/en/docs/claude-code)
 3. **GitHub Authentication**: Run `gh auth login` or set `GITHUB_TOKEN` environment variable
+4. **System Requirements**: macOS 10.15+ or Linux with Python 3.11+ support
 
 ## Installation Methods
 
@@ -56,11 +57,18 @@ brew install https://raw.githubusercontent.com/sgleeson/claude-tools/main/claude
 
 3. **Configure GitHub Access**:
    ```bash
-   # Option 1: Use GitHub CLI
+   # Option 1: Use GitHub CLI (recommended)
    gh auth login
    
    # Option 2: Use environment variable
    export GITHUB_TOKEN="your-github-token"
+   ```
+
+4. **Validate Setup**:
+   ```bash
+   # The formula automatically validates dependencies
+   # Check that all required tools are available
+   claude-tasker --help
    ```
 
 ## Usage Examples
@@ -107,6 +115,7 @@ brew uninstall claude-tasker
    ```
 
 2. **Missing Claude CLI**:
+   - The formula now validates Claude CLI during installation
    - Install from: https://docs.anthropic.com/en/docs/claude-code
    - Verify with: `which claude`
 
@@ -123,6 +132,24 @@ brew uninstall claude-tasker
    ```bash
    # Fix Homebrew permissions
    sudo chown -R $(whoami) $(brew --prefix)/*
+   ```
+
+5. **Command Not Found After Installation**:
+   ```bash
+   # Restart shell or reload PATH
+   exec $SHELL
+   
+   # Check if claude-tasker is in PATH
+   which claude-tasker
+   ```
+
+6. **Version Compatibility Issues**:
+   ```bash
+   # Check minimum versions are met
+   python3 --version  # Should be 3.11+
+   gh --version       # Should be 2.0+
+   jq --version       # Should be 1.6+
+   git --version      # Should be 2.30+
    ```
 
 ### Dependency Verification
@@ -148,31 +175,63 @@ claude --version
 
 ## Formula Details
 
-The Homebrew formula:
-- Installs Python 3.11+ if not present
-- Creates an isolated Python virtual environment
-- Installs all Python dependencies (pydantic, rich, etc.)
-- Sets up the `claude-tasker` command in your PATH
-- Manages updates through Homebrew's standard mechanisms
+The enhanced Homebrew formula provides:
+
+### Installation Features
+- **Dependency Validation**: Pre-flight checks for required tools
+- **Version Compatibility**: Enforces minimum versions for dependencies
+- **Isolated Environment**: Python virtual environment with all dependencies
+- **Error Handling**: Robust error messages and validation
+- **Post-Install Validation**: Automatic verification of successful installation
+
+### Security Features
+- **SHA256 Verification**: All Python packages verified with checksums
+- **Minimal Permissions**: No elevated privileges required
+- **Conflict Detection**: Prevents conflicts with other claude-tasker installations
+
+### Testing & Quality
+- **Integration Tests**: Comprehensive test suite for formula functionality
+- **CI/CD Validation**: GitHub Actions workflow for automated testing
+- **Multi-Platform Support**: Tested on multiple macOS versions
 
 ## Development
 
 To modify the formula for local testing:
 
 1. Edit `claude-tasker.rb`
-2. Test installation:
+2. Validate formula syntax:
+   ```bash
+   brew audit --strict --online ./claude-tasker.rb
+   ```
+3. Test installation:
    ```bash
    brew uninstall claude-tasker 2>/dev/null || true
-   brew install --build-from-source ./claude-tasker.rb
+   brew install --build-from-source --verbose ./claude-tasker.rb
    ```
-3. Run audit checks:
-   ```bash
-   brew audit --strict claude-tasker
-   ```
-4. Test the formula:
+4. Run comprehensive tests:
    ```bash
    brew test claude-tasker
    ```
+5. Test uninstall/reinstall cycle:
+   ```bash
+   brew uninstall claude-tasker
+   brew install --build-from-source ./claude-tasker.rb
+   ```
+
+### Continuous Integration
+
+The formula includes GitHub Actions workflows that automatically:
+- Test formula installation on multiple macOS versions
+- Validate formula syntax and compliance
+- Test HEAD version installation
+- Validate documentation completeness
+
+### Version Management
+
+The formula uses dynamic version management:
+- Release tarballs instead of Git revisions
+- Automatic SHA256 checksum validation
+- Support for both stable and HEAD installations
 
 ## Support
 

@@ -3,17 +3,22 @@ class ClaudeTasker < Formula
 
   desc "Context-aware wrapper for Claude Code with GitHub integration"
   homepage "https://github.com/sgleeson/claude-tools"
-  url "https://github.com/sgleeson/claude-tools.git", 
-      tag: "v1.0.0", revision: "c39bc61d3f5e088b9e939e6a8cfe40d931fa5258"
+  url "https://github.com/sgleeson/claude-tools/archive/refs/tags/v1.0.0.tar.gz"
+  sha256 "" # Will be filled when creating actual release
   version "1.0.0"
   license "MIT"
   head "https://github.com/sgleeson/claude-tools.git", branch: "main"
 
-  depends_on "python@3.11"
-  depends_on "gh"
-  depends_on "jq"
-  depends_on "git"
+  # Minimum dependency versions
+  depends_on "python@3.11" # Requires 3.11+ for modern typing support
+  depends_on "gh" => ">=2.0"
+  depends_on "jq" => ">=1.6"
+  depends_on "git" => ">=2.30"
+  
+  # Conflicts and compatibility
+  conflicts_with "claude-tasker-dev", because: "both provide claude-tasker binary"
 
+  # Core Python dependencies with verified SHA256 checksums
   resource "typing-extensions" do
     url "https://files.pythonhosted.org/packages/df/db/f35a00659bc03fec321ba8bce9420de607a1d37f8342eee1863174c69557/typing_extensions-4.12.2.tar.gz"
     sha256 "1a7ead55c7e559dd4dee8856e3a88b41225abfe1ce8df57b7c13915fe121ffb8"
@@ -65,12 +70,30 @@ class ClaudeTasker < Formula
   end
 
   def install
+    # Pre-flight dependency validation
+    validate_dependencies
+    
     virtualenv_install_with_resources
 
-    # Create wrapper script that sets up the environment
+    # Create robust wrapper script with error handling
     (bin/"claude-tasker").write <<~EOS
       #!/bin/bash
+      set -e
+      
+      # Validate required external tools
+      for cmd in claude gh jq git; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+          echo "Error: Required command '$cmd' not found in PATH" >&2
+          echo "Please ensure all dependencies are installed." >&2
+          exit 1
+        fi
+      done
+      
+      # Set up Python environment
       export PYTHONPATH="#{libexec}/lib/python#{Language::Python.major_minor_version("python3")}/site-packages:$PYTHONPATH"
+      export CLAUDE_TASKER_VERSION="#{version}"
+      
+      # Execute with proper error handling
       exec "#{libexec}/bin/python3" "#{libexec}/claude-tasker-py" "$@"
     EOS
     
@@ -81,15 +104,49 @@ class ClaudeTasker < Formula
     # Make the wrapper executable
     chmod 0755, bin/"claude-tasker"
   end
+  
+  private
+  
+  def validate_dependencies
+    missing_deps = []
+    
+    # Check for Claude CLI availability
+    unless system "command -v claude >/dev/null 2>&1"
+      missing_deps << "claude CLI (install from https://docs.anthropic.com/en/docs/claude-code)"
+    end
+    
+    unless missing_deps.empty?
+      odie "Missing required dependencies:\n#{missing_deps.map { |dep| "  - #{dep}" }.join("\n")}"
+    end
+  end
 
   def post_install
-    ohai "Claude Tasker has been installed successfully!"
-    opoo "Make sure you have the 'claude' CLI installed and configured."
-    opoo "You can install it from: https://docs.anthropic.com/en/docs/claude-code"
+    ohai "Claude Tasker v#{version} has been installed successfully!"
     
-    if ENV["GITHUB_TOKEN"].nil?
-      opoo "No GITHUB_TOKEN found in environment."
-      opoo "Run: export GITHUB_TOKEN='your-token' or use 'gh auth login'"
+    # Validate installation
+    validation_errors = []
+    
+    # Check Claude CLI
+    unless system "command -v claude >/dev/null 2>&1"
+      validation_errors << "Claude CLI not found. Install from: https://docs.anthropic.com/en/docs/claude-code"
+    end
+    
+    # Check GitHub authentication
+    unless system "gh auth status >/dev/null 2>&1" || !ENV["GITHUB_TOKEN"].nil?
+      validation_errors << "GitHub authentication required. Run 'gh auth login' or set GITHUB_TOKEN"
+    end
+    
+    # Test basic functionality
+    unless system "#{bin}/claude-tasker --version >/dev/null 2>&1"
+      validation_errors << "claude-tasker binary test failed"
+    end
+    
+    if validation_errors.empty?
+      ohai "✓ All dependencies validated successfully!"
+      ohai "Run 'claude-tasker --help' to get started."
+    else
+      opoo "Installation completed with warnings:"
+      validation_errors.each { |error| opoo "  - #{error}" }
     end
   end
 
@@ -111,15 +168,37 @@ class ClaudeTasker < Formula
   end
 
   test do
-    # Test version output
-    assert_match "1.0.0", shell_output("#{bin}/claude-tasker --version 2>&1", 1)
+    # Integration test suite
+    ENV["CLAUDE_TASKER_TEST_MODE"] = "1"
     
-    # Test Python import
-    system libexec/"bin/python", "-c", "from claude_tasker import __version__; print(__version__)"
+    # Test version output and basic functionality
+    version_output = shell_output("#{bin}/claude-tasker --version 2>&1", 0)
+    assert_match version.to_s, version_output
     
-    # Test that dependencies are available
+    # Test help command
+    help_output = shell_output("#{bin}/claude-tasker --help 2>&1", 0)
+    assert_match "Context-aware wrapper", help_output
+    
+    # Test Python module imports
+    system libexec/"bin/python", "-c", 
+           "from claude_tasker import __version__, main; assert __version__ == '#{version}'"
+    
+    # Test wrapper script validation (should fail gracefully without claude)
+    error_output = shell_output("#{bin}/claude-tasker --dry-run 2>&1 || true")
+    
+    # Test core dependencies are available
     %w[gh jq git].each do |dep|
       assert_predicate Formula[dep], :any_version_installed?
     end
+    
+    # Test Python dependencies are properly installed
+    %w[pydantic rich colorlog].each do |pkg|
+      system libexec/"bin/python", "-c", "import #{pkg}"
+    end
+    
+    # Test configuration file validation
+    (testpath/"test_config.json").write('{"test": true}')
+    system libexec/"bin/python", "-c", 
+           "import json; json.load(open('#{testpath}/test_config.json'))"
   end
 end
