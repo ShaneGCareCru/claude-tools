@@ -1095,11 +1095,10 @@ Provide only the complete GitHub feature request content following this template
                         'claude', '-p', '--permission-mode', 'bypassPermissions'
                     ]
                 else:
-                    # Just generate/print prompt - with JSON output format for parsing
+                    # Just generate/print prompt - for bug/feature analysis, return markdown directly
                     logger.debug("Running Claude in prompt generation mode")
                     cmd = [
-                        'claude', '--print', '--output-format', 'json',
-                        '--append-system-prompt', 'Return ONLY valid markdown for the GitHub issue. No JSON objects, no code fences around the response.'
+                        'claude', '--print'
                     ]
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
@@ -1127,27 +1126,16 @@ Provide only the complete GitHub feature request content following this template
                     else:
                         logger.debug(f"Output preview: {result.stdout[:500]}...")
                 
-                # For Claude generation mode (non-execute), try JSON first then plain text
+                # For Claude generation mode (non-execute), return plain text/markdown
                 if tool_name == 'claude' and not execute_mode:
-                    logger.debug("Processing Claude generation response")
-                    try:
-                        parsed_json = json.loads(result.stdout)
-                        logger.debug("Claude generation response parsed as JSON")
-                        return LLMResult(
-                            success=True,
-                            data=parsed_json,
-                            stdout=result.stdout,
-                            tool=tool_name
-                        )
-                    except json.JSONDecodeError:
-                        logger.debug("Claude generation response processed as plain text")
-                        return LLMResult(
-                            success=True,
-                            text=result.stdout.strip(),
-                            data={'result': result.stdout.strip(), 'optimized_prompt': result.stdout.strip()},
-                            stdout=result.stdout,
-                            tool=tool_name
-                        )
+                    logger.debug("Processing Claude generation response as plain text/markdown")
+                    return LLMResult(
+                        success=True,
+                        text=result.stdout.strip(),
+                        data={'result': result.stdout.strip()},
+                        stdout=result.stdout,
+                        tool=tool_name
+                    )
                 else:
                     # For execute mode or LLM tool, try JSON first then fallback to text
                     try:
