@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 from unittest.mock import patch, Mock, call, MagicMock
 from src.claude_tasker.workspace_manager import WorkspaceManager
+from src.claude_tasker.services.command_executor import CommandExecutor
+from src.claude_tasker.services.git_service import GitService
 
 
 class TestWorkspaceManager:
@@ -13,39 +15,76 @@ class TestWorkspaceManager:
     
     def test_init(self):
         """Test WorkspaceManager initialization."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         assert workspace.cwd == Path(".").resolve()
         assert hasattr(workspace, 'interactive_mode')
     
     def test_init_with_custom_cwd(self, tmp_path):
         """Test WorkspaceManager initialization with custom directory."""
-        workspace = WorkspaceManager(str(tmp_path))
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            cwd=str(tmp_path),
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         assert workspace.cwd == tmp_path.resolve()
     
     def test_is_interactive_tty(self):
         """Test interactive mode detection with TTY."""
         with patch('os.isatty', return_value=True), \
              patch.dict('os.environ', {}, clear=True):
-            workspace = WorkspaceManager()
+            mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
             assert workspace.interactive_mode is True
     
     def test_is_interactive_ci(self):
         """Test interactive mode detection in CI environment."""
         with patch('os.isatty', return_value=True), \
              patch.dict('os.environ', {'CI': 'true'}):
-            workspace = WorkspaceManager()
+            mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
             assert workspace.interactive_mode is False
     
     def test_is_interactive_github_actions(self):
         """Test interactive mode detection in GitHub Actions."""
         with patch('os.isatty', return_value=True), \
              patch.dict('os.environ', {'GITHUB_ACTIONS': 'true'}):
-            workspace = WorkspaceManager()
+            mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
             assert workspace.interactive_mode is False
     
     def test_run_git_command_success(self):
         """Test successful git command execution."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="output", stderr="")
             
@@ -63,7 +102,13 @@ class TestWorkspaceManager:
     
     def test_run_git_command_failure(self):
         """Test git command execution failure."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=1, stdout="", stderr="error")
             
@@ -74,7 +119,13 @@ class TestWorkspaceManager:
     
     def test_run_git_command_exception(self):
         """Test git command execution with exception."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         with patch('subprocess.run', side_effect=Exception("Command not found")):
             result = workspace._run_git_command(['status'])
             
@@ -83,7 +134,13 @@ class TestWorkspaceManager:
     
     def test_detect_main_branch_current_main(self):
         """Test main branch detection when already on main."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="main\n")
             
@@ -94,7 +151,13 @@ class TestWorkspaceManager:
     
     def test_detect_main_branch_current_master(self):
         """Test main branch detection when already on master."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="master\n")
             
@@ -104,7 +167,13 @@ class TestWorkspaceManager:
     
     def test_detect_main_branch_exists(self):
         """Test main branch detection when main branch exists."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['branch', '--show-current']:
@@ -120,7 +189,13 @@ class TestWorkspaceManager:
     
     def test_detect_main_branch_master_fallback(self):
         """Test main branch detection falls back to master."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['branch', '--show-current']:
@@ -138,7 +213,13 @@ class TestWorkspaceManager:
     
     def test_detect_main_branch_default(self):
         """Test main branch detection defaults to main."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['branch', '--show-current']:
@@ -153,7 +234,13 @@ class TestWorkspaceManager:
     
     def test_get_current_branch_success(self):
         """Test getting current branch successfully."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="feature-branch\n")
             
@@ -164,7 +251,13 @@ class TestWorkspaceManager:
     
     def test_get_current_branch_failure(self):
         """Test getting current branch when command fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=1, stdout="")
             
@@ -174,7 +267,13 @@ class TestWorkspaceManager:
     
     def test_is_working_directory_clean_true(self):
         """Test working directory clean check when clean."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="")
             
@@ -185,7 +284,13 @@ class TestWorkspaceManager:
     
     def test_is_working_directory_clean_false(self):
         """Test working directory clean check when dirty."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="M file.txt\n")
             
@@ -195,7 +300,13 @@ class TestWorkspaceManager:
     
     def test_is_working_directory_clean_command_failure(self):
         """Test working directory clean check when git command fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=1, stdout="")
             
@@ -205,7 +316,13 @@ class TestWorkspaceManager:
     
     def test_workspace_hygiene_force(self):
         """Test workspace hygiene with force flag."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['reset', '--hard', 'HEAD']:
@@ -221,7 +338,13 @@ class TestWorkspaceManager:
     
     def test_workspace_hygiene_interactive_confirm(self):
         """Test workspace hygiene with interactive confirmation."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         workspace.interactive_mode = True
         
         def side_effect(cmd):
@@ -240,7 +363,13 @@ class TestWorkspaceManager:
     
     def test_workspace_hygiene_interactive_decline(self):
         """Test workspace hygiene when user declines cleanup."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         workspace.interactive_mode = True
         
         with patch.object(workspace, '_confirm_cleanup', return_value=False), \
@@ -251,7 +380,13 @@ class TestWorkspaceManager:
     
     def test_workspace_hygiene_reset_failure(self):
         """Test workspace hygiene when reset fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['reset', '--hard', 'HEAD']:
@@ -265,7 +400,13 @@ class TestWorkspaceManager:
     
     def test_workspace_hygiene_clean_failure(self):
         """Test workspace hygiene when clean fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['reset', '--hard', 'HEAD']:
@@ -281,7 +422,13 @@ class TestWorkspaceManager:
     
     def test_confirm_cleanup_yes(self):
         """Test user confirmation for cleanup - yes."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch('builtins.input', return_value='1'), \
              patch('builtins.print'):
@@ -291,7 +438,13 @@ class TestWorkspaceManager:
     
     def test_confirm_cleanup_no(self):
         """Test user confirmation for cleanup - no."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch('builtins.input', return_value='3'), \
              patch('builtins.print'):
@@ -301,7 +454,13 @@ class TestWorkspaceManager:
     
     def test_confirm_cleanup_eof(self):
         """Test user confirmation for cleanup - EOF."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch('builtins.input', side_effect=EOFError()):
             result = workspace._confirm_cleanup()
@@ -310,7 +469,13 @@ class TestWorkspaceManager:
     
     def test_confirm_cleanup_keyboard_interrupt(self):
         """Test user confirmation for cleanup - KeyboardInterrupt."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch('builtins.input', side_effect=KeyboardInterrupt()):
             result = workspace._confirm_cleanup()
@@ -319,7 +484,13 @@ class TestWorkspaceManager:
     
     def test_create_timestamped_branch_success(self):
         """Test successful timestamped branch creation."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['checkout', 'main']:
@@ -341,7 +512,13 @@ class TestWorkspaceManager:
     
     def test_create_timestamped_branch_checkout_base_failure(self):
         """Test timestamped branch creation when base checkout fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['checkout', 'main']:
@@ -358,7 +535,13 @@ class TestWorkspaceManager:
     
     def test_create_timestamped_branch_create_failure(self):
         """Test timestamped branch creation when branch creation fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['checkout', 'main']:
@@ -380,7 +563,13 @@ class TestWorkspaceManager:
     
     def test_create_timestamped_branch_pull_failure_continues(self):
         """Test timestamped branch creation continues when pull fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['checkout', 'main']:
@@ -402,7 +591,13 @@ class TestWorkspaceManager:
     
     def test_commit_changes_success(self):
         """Test successful commit creation."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['add', '.']:
@@ -420,7 +615,13 @@ class TestWorkspaceManager:
     
     def test_commit_changes_no_changes(self):
         """Test commit when no changes to commit."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['add', '.']:
@@ -436,7 +637,13 @@ class TestWorkspaceManager:
     
     def test_commit_changes_add_failure(self):
         """Test commit when add fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['add', '.']:
@@ -450,7 +657,13 @@ class TestWorkspaceManager:
     
     def test_commit_changes_commit_failure(self):
         """Test commit when commit fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['add', '.']:
@@ -468,7 +681,13 @@ class TestWorkspaceManager:
     
     def test_push_branch_success(self):
         """Test successful branch push."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0)
@@ -480,7 +699,13 @@ class TestWorkspaceManager:
     
     def test_push_branch_failure(self):
         """Test branch push failure."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=1)
@@ -491,7 +716,13 @@ class TestWorkspaceManager:
     
     def test_has_changes_to_commit_unstaged(self):
         """Test change detection with unstaged changes."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['status', '--porcelain']:
@@ -507,7 +738,13 @@ class TestWorkspaceManager:
     
     def test_has_changes_to_commit_staged(self):
         """Test change detection with staged changes."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['status', '--porcelain']:
@@ -523,7 +760,13 @@ class TestWorkspaceManager:
     
     def test_has_changes_to_commit_untracked(self):
         """Test change detection with untracked files."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['status', '--porcelain']:
@@ -539,7 +782,13 @@ class TestWorkspaceManager:
     
     def test_has_changes_to_commit_none(self):
         """Test change detection with no changes."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['status', '--porcelain']:
@@ -555,7 +804,13 @@ class TestWorkspaceManager:
     
     def test_get_git_diff_with_base_branch(self):
         """Test getting git diff with base branch."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="diff content")
@@ -567,7 +822,13 @@ class TestWorkspaceManager:
     
     def test_get_git_diff_no_base_branch(self):
         """Test getting git diff without base branch."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         def side_effect(cmd):
             if cmd == ['diff', 'HEAD']:
@@ -583,7 +844,13 @@ class TestWorkspaceManager:
     
     def test_get_git_diff_failure(self):
         """Test getting git diff when command fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=1, stdout="")
@@ -594,7 +861,13 @@ class TestWorkspaceManager:
     
     def test_get_commit_log_success(self):
         """Test getting commit log successfully."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="abc123 Commit\ndef456 Another")
@@ -609,7 +882,13 @@ class TestWorkspaceManager:
     
     def test_get_commit_log_failure(self):
         """Test getting commit log when command fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=1, stdout="")
@@ -620,7 +899,13 @@ class TestWorkspaceManager:
     
     def test_switch_to_branch_success(self):
         """Test successful branch switch."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0)
@@ -632,7 +917,13 @@ class TestWorkspaceManager:
     
     def test_switch_to_branch_failure(self):
         """Test branch switch failure."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=1)
@@ -643,7 +934,13 @@ class TestWorkspaceManager:
     
     def test_branch_exists_true(self):
         """Test branch existence check when branch exists."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0)
@@ -655,7 +952,13 @@ class TestWorkspaceManager:
     
     def test_branch_exists_false(self):
         """Test branch existence check when branch doesn't exist."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=1)
@@ -666,7 +969,13 @@ class TestWorkspaceManager:
     
     def test_delete_branch_success(self):
         """Test successful branch deletion."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0)
@@ -678,7 +987,13 @@ class TestWorkspaceManager:
     
     def test_delete_branch_force(self):
         """Test force branch deletion."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0)
@@ -690,7 +1005,13 @@ class TestWorkspaceManager:
     
     def test_delete_branch_failure(self):
         """Test branch deletion failure."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=1)
@@ -701,7 +1022,13 @@ class TestWorkspaceManager:
     
     def test_get_remote_url_success(self):
         """Test getting remote URL successfully."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="https://github.com/user/repo.git\n")
@@ -713,7 +1040,13 @@ class TestWorkspaceManager:
     
     def test_get_remote_url_failure(self):
         """Test getting remote URL when command fails."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=1, stdout="")
@@ -724,7 +1057,13 @@ class TestWorkspaceManager:
     
     def test_is_branch_pushed_true(self):
         """Test checking if branch is pushed when it exists on remote."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=0)
@@ -736,7 +1075,13 @@ class TestWorkspaceManager:
     
     def test_is_branch_pushed_false(self):
         """Test checking if branch is pushed when it doesn't exist on remote."""
-        workspace = WorkspaceManager()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        workspace = WorkspaceManager(
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=Mock()
+        )
         
         with patch.object(workspace, '_run_git_command') as mock_run:
             mock_run.return_value = Mock(returncode=1)
@@ -753,7 +1098,9 @@ class TestEnvironmentValidator:
         """Test successful git repository validation."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout=".git\n", stderr="")
@@ -774,7 +1121,9 @@ class TestEnvironmentValidator:
         """Test failed git repository validation."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=1, stderr="not a git repository")
@@ -788,7 +1137,9 @@ class TestEnvironmentValidator:
         """Test git repository validation when git not found."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         with patch('subprocess.run', side_effect=FileNotFoundError()):
             valid, message = validator.validate_git_repository()
@@ -800,7 +1151,9 @@ class TestEnvironmentValidator:
         """Test successful GitHub remote validation."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="https://github.com/user/repo.git\n", stderr="")
@@ -815,7 +1168,9 @@ class TestEnvironmentValidator:
         """Test GitHub remote validation with non-GitHub remote."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="https://gitlab.com/user/repo.git\n", stderr="")
@@ -829,7 +1184,9 @@ class TestEnvironmentValidator:
         """Test CLAUDE.md file existence check when file exists."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         # Create CLAUDE.md file
         claude_md = tmp_path / "CLAUDE.md"
@@ -844,7 +1201,9 @@ class TestEnvironmentValidator:
         """Test CLAUDE.md file existence check when file missing."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         valid, message = validator.check_claude_md(str(tmp_path))
         
@@ -855,7 +1214,9 @@ class TestEnvironmentValidator:
         """Test successful tool availability check."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="/usr/bin/git\n", stderr="")
@@ -869,7 +1230,9 @@ class TestEnvironmentValidator:
         """Test failed tool availability check."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=1, stdout="", stderr="")
@@ -883,7 +1246,9 @@ class TestEnvironmentValidator:
         """Test comprehensive dependency validation when all pass."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         # Create CLAUDE.md file
         claude_md = tmp_path / "CLAUDE.md"
@@ -906,7 +1271,9 @@ class TestEnvironmentValidator:
         """Test comprehensive dependency validation when some fail."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         with patch.object(validator, 'validate_git_repository', return_value=(False, "Not a git repository")), \
              patch.object(validator, 'validate_github_remote', return_value=(False, "No GitHub remote")), \
@@ -923,7 +1290,9 @@ class TestEnvironmentValidator:
         """Test extraction of missing required dependencies."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         validation_results = {
             'tool_status': {
@@ -943,7 +1312,9 @@ class TestEnvironmentValidator:
         """Test formatting of successful validation report."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         validation_results = {
             'valid': True,
@@ -963,7 +1334,9 @@ class TestEnvironmentValidator:
         """Test formatting of failed validation report."""
         from src.claude_tasker.environment_validator import EnvironmentValidator
         
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        validator = EnvironmentValidator(mock_git_service)
         
         validation_results = {
             'valid': False,
