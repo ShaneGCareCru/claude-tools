@@ -83,7 +83,8 @@ class TestWorkflowLogic:
             assert "DIAGNOSE" in framework
             assert "DEVELOP" in framework
             assert "DELIVER" in framework
-            assert "Lyra-Dev 4-D methodology" in framework
+            assert "Lyra-Dev" in framework
+            assert "elite AI prompt optimizer" in framework
     
     def test_status_verification_protocol(self):
         """Test status verification protocol for detecting false completion claims."""

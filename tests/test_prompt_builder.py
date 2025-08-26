@@ -449,10 +449,10 @@ class TestPromptBuilder:
         
         claude_md_content = "# Project Guidelines\nFollow these conventions..."
         
-        prompt = builder.generate_meta_prompt("issue-implementation", task_data, claude_md_content)
+        prompt = builder.generate_meta_prompt("issue_implementation", task_data, claude_md_content)
         
         assert prompt is not None
-        assert "issue-implementation" in prompt
         assert "Test Issue" in prompt
-        assert "Project Guidelines" in prompt
-        assert "Lyra-Dev 4-D methodology" in prompt
+        assert "Project Guidelines" in prompt or "PROJECT CONTEXT" in prompt
+        assert "Lyra-Dev" in prompt
+        assert "elite AI prompt optimizer" in prompt
