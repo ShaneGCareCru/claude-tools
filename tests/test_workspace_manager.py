@@ -7,14 +7,30 @@ from pathlib import Path
 from unittest.mock import patch, Mock, call
 
 from src.claude_tasker.workspace_manager import WorkspaceManager
+from src.claude_tasker.services.command_executor import CommandExecutor
+from src.claude_tasker.services.git_service import GitService
+from src.claude_tasker.services.gh_service import GhService
 
 
 class TestWorkspaceManager:
     """Test workspace hygiene and git management functionality."""
     
+    def _create_workspace_manager(self, cwd=".", branch_strategy="reuse"):
+        """Helper to create WorkspaceManager with mocked services."""
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_gh_service = Mock(spec=GhService)
+        return WorkspaceManager(
+            cwd=cwd,
+            branch_strategy=branch_strategy,
+            command_executor=mock_executor,
+            git_service=mock_git_service,
+            gh_service=mock_gh_service
+        )
+    
     def test_workspace_hygiene_automatic_cleanup(self):
         """Test automatic workspace cleanup with git reset and clean."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         # Mock auto-cleanup environment variable
         with patch.dict(os.environ, {'CLAUDE_TASKER_AUTO_CLEANUP': '1'}), \
@@ -49,7 +65,7 @@ class TestWorkspaceManager:
     
     def test_interactive_cleanup_confirmation(self):
         """Test interactive cleanup confirmation when no auto-cleanup."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git, \
              patch('builtins.input', return_value='1'), \
@@ -85,7 +101,7 @@ class TestWorkspaceManager:
     
     def test_branch_detection_main_vs_master(self):
         """Test detection of main vs master branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             
@@ -117,7 +133,7 @@ class TestWorkspaceManager:
     
     def test_branch_detection_fallback_to_master(self):
         """Test fallback to master branch when main doesn't exist."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             
@@ -150,7 +166,7 @@ class TestWorkspaceManager:
     
     def test_timestamped_branch_creation(self):
         """Test creation of timestamped branches for issues."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch('time.time', return_value=1234567890), \
              patch.object(workspace, '_run_git_command') as mock_git:
@@ -187,7 +203,7 @@ class TestWorkspaceManager:
     
     def test_commit_and_push_workflow(self):
         """Test git commit and push workflow."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             
@@ -234,7 +250,7 @@ class TestWorkspaceManager:
     
     def test_workspace_hygiene_skip_when_clean(self):
         """Test that workspace hygiene skips cleanup when already clean."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             
@@ -258,7 +274,7 @@ class TestWorkspaceManager:
     
     def test_workspace_hygiene_stash_option(self):
         """Test stashing changes during workspace hygiene."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         workspace.interactive_mode = True  # Set interactive mode directly
         
         with patch.object(workspace, '_run_git_command') as mock_git, \
@@ -289,7 +305,7 @@ class TestWorkspaceManager:
     
     def test_has_changes_with_status_porcelain(self):
         """Test has_changes_to_commit using git status --porcelain."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             
@@ -307,7 +323,7 @@ class TestWorkspaceManager:
     
     def test_create_branch_when_main_missing(self):
         """Test branch creation when main branch doesn't exist locally."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch('time.time', return_value=1234567890), \
              patch.object(workspace, '_run_git_command') as mock_git:
@@ -340,7 +356,7 @@ class TestWorkspaceManager:
     
     def test_workspace_status_detection(self):
         """Test detection of workspace changes requiring cleanup."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             
@@ -373,7 +389,7 @@ class TestWorkspaceManager:
     
     def test_non_interactive_environment_handling(self):
         """Test handling of non-interactive environments (CI/automation)."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git, \
              patch.object(workspace, '_is_interactive', return_value=False):
@@ -417,7 +433,7 @@ class TestWorkspaceManager:
     
     def test_is_interactive_detection(self):
         """Test interactive mode detection."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         # Should return boolean
         result = workspace._is_interactive()
@@ -425,7 +441,7 @@ class TestWorkspaceManager:
     
     def test_detect_main_branch_main_exists(self):
         """Test main branch detection when main branch exists."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             # Mock main branch exists
@@ -440,7 +456,7 @@ class TestWorkspaceManager:
     
     def test_detect_main_branch_master_fallback(self):
         """Test main branch detection falls back to master."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             # Mock main doesn't exist, master does
@@ -460,7 +476,7 @@ class TestWorkspaceManager:
     
     def test_detect_main_branch_develop_fallback(self):
         """Test main branch detection falls back to develop."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             # Mock neither main nor master exist, develop does
@@ -479,7 +495,7 @@ class TestWorkspaceManager:
     
     def test_get_current_branch_success(self):
         """Test getting current branch successfully."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -492,7 +508,7 @@ class TestWorkspaceManager:
     
     def test_get_current_branch_error(self):
         """Test getting current branch with error."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -505,7 +521,7 @@ class TestWorkspaceManager:
     
     def test_is_working_directory_clean_yes(self):
         """Test working directory is clean."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -518,7 +534,7 @@ class TestWorkspaceManager:
     
     def test_is_working_directory_clean_no(self):
         """Test working directory is not clean."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -531,7 +547,7 @@ class TestWorkspaceManager:
     
     def test_stash_changes_success(self):
         """Test successfully stashing changes."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -552,7 +568,7 @@ class TestWorkspaceManager:
     
     def test_stash_changes_failure(self):
         """Test failing to stash changes."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -565,7 +581,7 @@ class TestWorkspaceManager:
     
     def test_validate_branch_for_issue_correct_branch(self):
         """Test branch validation for correct issue branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, 'get_current_branch', return_value='issue-123-1234567890'):
             
@@ -576,7 +592,7 @@ class TestWorkspaceManager:
     
     def test_validate_branch_for_issue_wrong_branch(self):
         """Test branch validation for wrong issue branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, 'get_current_branch', return_value='issue-456-1234567890'):
             
@@ -589,7 +605,7 @@ class TestWorkspaceManager:
     
     def test_validate_branch_for_issue_no_current_branch(self):
         """Test branch validation when no current branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, 'get_current_branch', return_value=None):
             
@@ -600,7 +616,7 @@ class TestWorkspaceManager:
     
     def test_commit_changes_success(self):
         """Test successfully committing changes."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.side_effect = [
@@ -615,7 +631,7 @@ class TestWorkspaceManager:
     
     def test_commit_changes_failure(self):
         """Test failing to commit changes."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -628,7 +644,7 @@ class TestWorkspaceManager:
     
     def test_push_branch_success(self):
         """Test successfully pushing branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -641,7 +657,7 @@ class TestWorkspaceManager:
     
     def test_push_branch_failure(self):
         """Test failing to push branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -654,7 +670,7 @@ class TestWorkspaceManager:
     
     def test_has_changes_to_commit_with_changes(self):
         """Test detecting changes to commit."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -667,7 +683,7 @@ class TestWorkspaceManager:
     
     def test_has_changes_to_commit_no_changes(self):
         """Test no changes to commit."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -680,7 +696,7 @@ class TestWorkspaceManager:
     
     def test_get_git_diff_with_base_branch(self):
         """Test getting git diff with base branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -694,7 +710,7 @@ class TestWorkspaceManager:
     
     def test_get_git_diff_error(self):
         """Test getting git diff with error."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -707,7 +723,7 @@ class TestWorkspaceManager:
     
     def test_get_commit_log_success(self):
         """Test getting commit log successfully."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -721,7 +737,7 @@ class TestWorkspaceManager:
     
     def test_get_commit_log_error(self):
         """Test getting commit log with error."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -734,7 +750,7 @@ class TestWorkspaceManager:
     
     def test_switch_to_branch_success(self):
         """Test successfully switching to branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -747,7 +763,7 @@ class TestWorkspaceManager:
     
     def test_switch_to_branch_failure(self):
         """Test failing to switch to branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -760,7 +776,7 @@ class TestWorkspaceManager:
     
     def test_branch_exists_yes(self):
         """Test branch exists check when branch exists."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -773,7 +789,7 @@ class TestWorkspaceManager:
     
     def test_branch_exists_no(self):
         """Test branch exists check when branch doesn't exist."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -786,7 +802,7 @@ class TestWorkspaceManager:
     
     def test_delete_branch_success(self):
         """Test successfully deleting branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -799,7 +815,7 @@ class TestWorkspaceManager:
     
     def test_delete_branch_force(self):
         """Test force deleting branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -814,7 +830,7 @@ class TestWorkspaceManager:
     
     def test_delete_branch_failure(self):
         """Test failing to delete branch."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -827,7 +843,7 @@ class TestWorkspaceManager:
     
     def test_get_remote_url_success(self):
         """Test getting remote URL successfully."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -840,7 +856,7 @@ class TestWorkspaceManager:
     
     def test_get_remote_url_failure(self):
         """Test getting remote URL with failure."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -853,7 +869,7 @@ class TestWorkspaceManager:
     
     def test_is_branch_pushed_yes(self):
         """Test checking if branch is pushed when it is."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -866,7 +882,7 @@ class TestWorkspaceManager:
     
     def test_is_branch_pushed_no(self):
         """Test checking if branch is pushed when it's not."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -879,7 +895,7 @@ class TestWorkspaceManager:
     
     def test_has_changes_alias_method(self):
         """Test has_changes method (alias for has_changes_to_commit)."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
@@ -892,7 +908,7 @@ class TestWorkspaceManager:
     
     def test_cleanup_old_branches_success(self):
         """Test successfully cleaning up old branches."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             # Mock finding old branches and deleting them
@@ -912,7 +928,7 @@ class TestWorkspaceManager:
     
     def test_cleanup_old_branches_error(self):
         """Test cleanup old branches with error."""
-        workspace = WorkspaceManager()
+        workspace = self._create_workspace_manager()
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(

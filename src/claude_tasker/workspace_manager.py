@@ -16,20 +16,37 @@ logger = get_logger(__name__)
 class WorkspaceManager:
     """Manages workspace hygiene, Git operations, and branch management."""
     
-    def __init__(self, cwd: str = ".", branch_strategy: str = "reuse"):
+    def __init__(self, cwd: str = ".", branch_strategy: str = "reuse", 
+                 command_executor: Optional[CommandExecutor] = None,
+                 git_service: Optional[GitService] = None,
+                 gh_service: Optional[GhService] = None):
         """Initialize workspace manager.
         
         Args:
             cwd: Current working directory
             branch_strategy: Branch strategy - "always_new", "reuse", or "reuse_or_fail"
+            command_executor: Optional CommandExecutor instance (for testing)
+            git_service: Optional GitService instance (for testing)  
+            gh_service: Optional GhService instance (for testing)
         """
         self.cwd = Path(cwd).resolve()
         self.interactive_mode = self._is_interactive()
         
-        # Initialize services for branch manager
-        self.command_executor = CommandExecutor()
-        self.git_service = GitService(self.command_executor)
-        self.gh_service = GhService(self.command_executor)
+        # Initialize services for branch manager (allow injection for testing)
+        if command_executor is None:
+            self.command_executor = CommandExecutor()
+        else:
+            self.command_executor = command_executor
+            
+        if git_service is None:
+            self.git_service = GitService(self.command_executor)
+        else:
+            self.git_service = git_service
+            
+        if gh_service is None:
+            self.gh_service = GhService(self.command_executor)
+        else:
+            self.gh_service = gh_service
         
         # Initialize branch manager with specified strategy
         strategy_map = {
