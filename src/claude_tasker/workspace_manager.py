@@ -1,12 +1,14 @@
 """Workspace and Git management module for claude-tasker."""
 
-import subprocess
 import os
 import time
 from typing import Tuple, Optional, List
 from pathlib import Path
 from src.claude_tasker.logging_config import get_logger
 from src.claude_tasker.branch_manager import BranchManager, BranchStrategy
+from src.claude_tasker.services.git_service import GitService
+from src.claude_tasker.services.gh_service import GhService
+from src.claude_tasker.services.command_executor import CommandExecutor, CommandResult
 
 logger = get_logger(__name__)
 
