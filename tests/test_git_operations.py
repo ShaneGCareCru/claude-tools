@@ -48,7 +48,7 @@ class TestWorkspaceManager:
             git_service=mock_git_service,
             gh_service=Mock()
         )
-            assert workspace.interactive_mode is True
+        assert workspace.interactive_mode is True
     
     def test_is_interactive_ci(self):
         """Test interactive mode detection in CI environment."""
