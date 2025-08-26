@@ -1,6 +1,5 @@
 """Prompt building module implementing two-stage execution and Lyra-Dev framework."""
 
-import subprocess
 import json
 import tempfile
 from typing import Dict, Optional, Any
@@ -8,6 +7,7 @@ from pathlib import Path
 from .github_client import IssueData, PRData
 from .logging_config import get_logger
 from .prompt_models import ExecutionOptions, PromptContext, LLMResult, TwoStageResult
+from .services.command_executor import CommandExecutor
 import logging
 
 logger = get_logger(__name__)
@@ -16,7 +16,8 @@ logger = get_logger(__name__)
 class PromptBuilder:
     """Builds optimized prompts using two-stage execution and Lyra-Dev framework."""
     
-    def __init__(self):
+    def __init__(self, command_executor: CommandExecutor):
+        self.executor = command_executor
         self.lyra_dev_framework = self._load_lyra_dev_framework()
     
     def _load_lyra_dev_framework(self) -> str:
@@ -1109,9 +1110,23 @@ Provide only the complete GitHub feature request content following this template
             logger.debug(f"Passing prompt via stdin ({len(prompt)} chars)")
             # 30 minutes for execution, 10 minutes for generation
             timeout_val = 1800 if execute_mode else 600
-            result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False, timeout=timeout_val)
+            # For now, use a temp file approach since executor doesn't support stdin directly
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(prompt)
+                temp_file = f.name
             
-            if result.returncode == 0:
+            try:
+                # Adjust command to use file input if supported
+                if tool_name == 'claude':
+                    cmd = ['claude', '--file', temp_file] + ([] if execute_mode else ['--print'])
+                elif tool_name == 'llm':
+                    cmd = ['llm', 'prompt', temp_file]
+                
+                result = self.executor.execute(cmd, timeout=int(timeout_val * 1000))  # Convert to milliseconds
+            finally:
+                Path(temp_file).unlink(missing_ok=True)
+            
+            if result.success:
                 if execute_mode:
                     logger.debug(f"Claude execution completed successfully")
                     logger.debug(f"Output length: {len(result.stdout)} chars")
@@ -1519,15 +1534,12 @@ Return ONLY the optimized prompt text that Claude will execute - no wrapper comm
                 logger.debug(f"Prompt length: {len(prompt)} chars")
                 
                 # Execute with longer timeout for review generation
-                result = subprocess.run(
+                result = self.executor.execute(
                     cmd,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=1200  # 20 minute timeout for reviews
+                    timeout=1200000  # 20 minute timeout in milliseconds
                 )
                 
-                if result.returncode == 0:
+                if result.success:
                     output = result.stdout.strip()
                     logger.info(f"Claude review completed successfully")
                     logger.debug(f"Output length: {len(output)} chars")

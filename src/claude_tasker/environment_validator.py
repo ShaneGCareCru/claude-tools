@@ -1,14 +1,16 @@
 """Environment validation module for claude-tasker."""
 
-import subprocess
 import os
+import shutil
 from typing import List, Dict, Tuple
+from .services.git_service import GitService
 
 
 class EnvironmentValidator:
     """Validates environment and dependencies for claude-tasker execution."""
     
-    def __init__(self):
+    def __init__(self, git_service: GitService):
+        self.git_service = git_service
         self.required_tools = {
             'git': 'git',
             'gh': 'gh (GitHub CLI)', 
@@ -22,36 +24,24 @@ class EnvironmentValidator:
     def validate_git_repository(self, path: str = ".") -> Tuple[bool, str]:
         """Validate that current directory is a git repository."""
         try:
-            result = subprocess.run(
-                ['git', 'rev-parse', '--git-dir'],
-                cwd=path,
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            if result.returncode == 0:
+            result = self.git_service.rev_parse('--git-dir', cwd=path)
+            if result.success:
                 return True, "Valid git repository"
             else:
                 return False, "Not a git repository"
-        except FileNotFoundError:
-            return False, "Git not found"
+        except Exception as e:
+            return False, f"Git validation error: {str(e)}"
     
     def validate_github_remote(self, path: str = ".") -> Tuple[bool, str]:
         """Validate that repository has GitHub remote."""
         try:
-            result = subprocess.run(
-                ['git', 'config', '--get', 'remote.origin.url'],
-                cwd=path,
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            if result.returncode == 0 and 'github.com' in result.stdout:
-                return True, f"GitHub remote: {result.stdout.strip()}"
+            remote_url = self.git_service.get_remote_url('origin', cwd=path)
+            if remote_url and 'github.com' in remote_url:
+                return True, f"GitHub remote: {remote_url}"
             else:
                 return False, "No GitHub remote found"
-        except FileNotFoundError:
-            return False, "Git not found"
+        except Exception as e:
+            return False, f"Remote validation error: {str(e)}"
     
     def check_claude_md(self, path: str = ".") -> Tuple[bool, str]:
         """Check for CLAUDE.md file existence."""
@@ -62,17 +52,11 @@ class EnvironmentValidator:
             return False, "CLAUDE.md not found - required for project context"
     
     def check_tool_availability(self, tool: str) -> Tuple[bool, str]:
-        """Check if a specific tool is available."""
+        """Check if a specific tool is available using shutil.which."""
         try:
-            result = subprocess.run(
-                ['command', '-v', tool],
-                capture_output=True,
-                text=True,
-                check=False,
-                shell=True
-            )
-            if result.returncode == 0:
-                return True, f"{tool} found at {result.stdout.strip()}"
+            tool_path = shutil.which(tool)
+            if tool_path:
+                return True, f"{tool} found at {tool_path}"
             else:
                 return False, f"{tool} not found"
         except Exception as e:

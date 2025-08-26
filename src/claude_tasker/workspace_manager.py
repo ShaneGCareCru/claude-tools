@@ -41,24 +41,20 @@ class WorkspaceManager:
             os.environ.get('GITHUB_ACTIONS') != 'true'  # not in GitHub Actions
         )
     
-    def _run_git_command(self, cmd: List[str], **kwargs) -> subprocess.CompletedProcess:
-        """Execute git command with proper error handling."""
-        try:
-            return subprocess.run(
-                ['git'] + cmd,
-                cwd=self.cwd,
-                capture_output=True,
-                text=True,
-                check=False,
-                **kwargs
-            )
-        except Exception as e:
-            return subprocess.CompletedProcess(
-                args=['git'] + cmd,
-                returncode=1,
-                stdout="",
-                stderr=str(e)
-            )
+    def _run_git_command(self, cmd: List[str], **kwargs):
+        """Execute git command using GitService."""
+        # Use GitService's underlying executor which returns CommandResult
+        result = self.git_service.executor.execute(['git'] + cmd, cwd=str(self.cwd))
+        
+        # Create a subprocess.CompletedProcess-compatible object
+        class CompatibleResult:
+            def __init__(self, command_result):
+                self.args = ['git'] + cmd
+                self.returncode = 0 if command_result.success else command_result.returncode
+                self.stdout = command_result.stdout
+                self.stderr = command_result.stderr
+        
+        return CompatibleResult(result)
     
     def detect_main_branch(self) -> str:
         """Detect the main branch (main, master, or default)."""

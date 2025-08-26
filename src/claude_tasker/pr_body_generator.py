@@ -1,11 +1,11 @@
 """PR body generation module with template detection and context aggregation."""
 
-import subprocess
 import tempfile
 from typing import Optional, Dict, Any
 from pathlib import Path
 from .github_client import IssueData
 from .logging_config import get_logger
+from .services.command_executor import CommandExecutor
 
 logger = get_logger(__name__)
 
@@ -13,7 +13,8 @@ logger = get_logger(__name__)
 class PRBodyGenerator:
     """Generates intelligent PR body content with template detection and context aggregation."""
     
-    def __init__(self):
+    def __init__(self, command_executor: CommandExecutor):
+        self.executor = command_executor
         self.max_size = 10000  # GitHub PR body size limit
         self.template_paths = [
             '.github/pull_request_template.md',
@@ -141,17 +142,18 @@ class PRBodyGenerator:
                 f.write(prompt)
                 prompt_file = f.name
             
-            result = subprocess.run([
+            result = self.executor.execute([
                 'llm', 'prompt', prompt_file,
                 '--max-tokens', '2000'
-            ], capture_output=True, text=True, check=False)
+            ])
             
             Path(prompt_file).unlink()  # Clean up temp file
             
-            if result.returncode == 0:
+            if result.success:
                 generated_body = result.stdout.strip()
                 return self._ensure_size_limit(generated_body)
             else:
+                logger.warning(f"LLM generation failed: {result.stderr}")
                 return None
                 
         except (FileNotFoundError, Exception):
@@ -166,17 +168,18 @@ class PRBodyGenerator:
                 f.write(prompt)
                 prompt_file = f.name
             
-            result = subprocess.run([
+            result = self.executor.execute([
                 'claude', '--file', prompt_file,
                 '--max-tokens', '2000'
-            ], capture_output=True, text=True, check=False)
+            ])
             
             Path(prompt_file).unlink()  # Clean up temp file
             
-            if result.returncode == 0:
+            if result.success:
                 generated_body = result.stdout.strip()
                 return self._ensure_size_limit(generated_body)
             else:
+                logger.warning(f"Claude generation failed: {result.stderr}")
                 return None
                 
         except (FileNotFoundError, Exception):

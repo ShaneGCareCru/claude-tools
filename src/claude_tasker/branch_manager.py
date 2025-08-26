@@ -3,12 +3,14 @@
 import os
 import re
 import time
-import subprocess
+import json
 from typing import Tuple, Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 
 from src.claude_tasker.logging_config import get_logger
+from src.claude_tasker.services.git_service import GitService
+from src.claude_tasker.services.gh_service import GhService
 
 logger = get_logger(__name__)
 
@@ -36,8 +38,13 @@ class BranchInfo:
 class BranchManager:
     """Manages Git branches with intelligent reuse capabilities."""
     
-    def __init__(self, strategy: BranchStrategy = BranchStrategy.REUSE_WHEN_POSSIBLE):
-        """Initialize branch manager with specified strategy."""
+    def __init__(self, 
+                 git_service: GitService,
+                 gh_service: GhService,
+                 strategy: BranchStrategy = BranchStrategy.REUSE_WHEN_POSSIBLE):
+        """Initialize branch manager with specified strategy and services."""
+        self.git_service = git_service
+        self.gh_service = gh_service
         self.strategy = strategy
         self.repo_owner = None
         self.repo_name = None
@@ -46,11 +53,8 @@ class BranchManager:
     def _init_repo_info(self):
         """Initialize repository information from git remote."""
         try:
-            result = subprocess.run(
-                ['git', 'remote', 'get-url', 'origin'],
-                capture_output=True, text=True, check=False
-            )
-            if result.returncode == 0:
+            result = self.git_service.remote("get-url", "origin")
+            if result.success:
                 url = result.stdout.strip()
                 # Parse owner/repo from URL
                 match = re.search(r'github\.com[:/]([^/]+)/([^/.]+)', url)
@@ -68,37 +72,27 @@ class BranchManager:
         # Pattern to match issue branches
         pattern = f"issue-{issue_number}-"
         
-        # Get local branches
-        local_result = subprocess.run(
-            ['git', 'branch', '--list', f'*{pattern}*'],
-            capture_output=True, text=True, check=False
-        )
-        
-        # Get remote branches
-        remote_result = subprocess.run(
-            ['git', 'branch', '-r', '--list', f'*{pattern}*'],
-            capture_output=True, text=True, check=False
-        )
-        
         # Get current branch
-        current_result = subprocess.run(
-            ['git', 'branch', '--show-current'],
-            capture_output=True, text=True, check=False
-        )
-        current_branch = current_result.stdout.strip() if current_result.returncode == 0 else ""
+        current_branch = self.git_service.current_branch() or ""
+        
+        # Get local branches
+        local_result = self.git_service.branch(list_all=False)
+        
+        # Get remote branches 
+        remote_result = self.git_service.branch(list_all=True)
         
         # Parse local branches
-        if local_result.returncode == 0:
+        if local_result.success:
             for line in local_result.stdout.strip().split('\n'):
-                if line:
+                if line and pattern in line:
                     branch_name = line.strip().lstrip('* ')
                     if branch_name:
                         branches.append(self._analyze_branch(branch_name, current_branch))
         
         # Parse remote branches
-        if remote_result.returncode == 0:
+        if remote_result.success:
             for line in remote_result.stdout.strip().split('\n'):
-                if line:
+                if line and pattern in line:
                     # Remote branches are prefixed with origin/
                     branch_name = line.strip().replace('origin/', '')
                     if branch_name and not any(b.name == branch_name for b in branches):
@@ -129,19 +123,11 @@ class BranchManager:
             info.timestamp = match.group(2)
         
         # Check if branch exists remotely
-        remote_check = subprocess.run(
-            ['git', 'ls-remote', '--heads', 'origin', branch_name],
-            capture_output=True, text=True, check=False
-        )
-        info.exists_remotely = bool(remote_check.stdout.strip())
+        info.exists_remotely = self.git_service.branch_exists(branch_name, remote=True)
         
         # Check for uncommitted changes if it's the current branch
         if info.is_current:
-            status_result = subprocess.run(
-                ['git', 'status', '--porcelain'],
-                capture_output=True, text=True, check=False
-            )
-            info.has_uncommitted_changes = bool(status_result.stdout.strip())
+            info.has_uncommitted_changes = not self.git_service.is_clean()
         
         return info
     
@@ -152,33 +138,22 @@ class BranchManager:
             return None
         
         try:
-            # Search for PRs that mention the issue in title or body
-            result = subprocess.run(
-                ['gh', 'pr', 'list', 
-                 '--repo', f'{self.repo_owner}/{self.repo_name}',
-                 '--search', f'issue #{issue_number} in:title,body',
-                 '--state', 'open',
-                 '--json', 'number,title,headRefName,url,isDraft'],
-                capture_output=True, text=True, check=False
-            )
+            # Get all open PRs and filter for this issue
+            prs = self.gh_service.list_prs(state="open")
             
-            if result.returncode == 0 and result.stdout.strip():
-                import json
-                prs = json.loads(result.stdout)
-                
-                # Filter for PRs that actually reference this issue
-                for pr in prs:
-                    # Check if PR branch name matches issue pattern
-                    if f'issue-{issue_number}-' in pr.get('headRefName', ''):
-                        logger.info(f"Found existing PR #{pr['number']} for issue #{issue_number}")
-                        return pr
-                
-                # Fallback: check PR title/body more carefully
-                for pr in prs:
-                    if f'#{issue_number}' in pr.get('title', '') or \
-                       f'issue #{issue_number}' in pr.get('title', '').lower():
-                        logger.info(f"Found existing PR #{pr['number']} for issue #{issue_number}")
-                        return pr
+            # Filter for PRs that actually reference this issue
+            for pr in prs:
+                # Check if PR branch name matches issue pattern
+                if f'issue-{issue_number}-' in pr.get('headRefName', ''):
+                    logger.info(f"Found existing PR #{pr['number']} for issue #{issue_number}")
+                    return pr
+            
+            # Fallback: check PR title/body more carefully
+            for pr in prs:
+                if f'#{issue_number}' in pr.get('title', '') or \
+                   f'issue #{issue_number}' in pr.get('title', '').lower():
+                    logger.info(f"Found existing PR #{pr['number']} for issue #{issue_number}")
+                    return pr
             
         except Exception as e:
             logger.warning(f"Error checking for existing PRs: {e}")
@@ -246,32 +221,20 @@ class BranchManager:
     def _checkout_branch(self, branch_name: str, base_branch: str) -> Tuple[bool, str]:
         """Checkout an existing branch, handling remote-only branches."""
         # First, fetch the latest from remote
-        fetch_result = subprocess.run(
-            ['git', 'fetch', 'origin', branch_name],
-            capture_output=True, text=True, check=False
-        )
+        fetch_result = self.git_service.fetch("origin")
         
         # Check if branch exists locally
-        local_check = subprocess.run(
-            ['git', 'show-ref', '--verify', '--quiet', f'refs/heads/{branch_name}'],
-            capture_output=True, text=True, check=False
-        )
+        branch_exists_locally = self.git_service.branch_exists(branch_name, remote=False)
         
-        if local_check.returncode == 0:
+        if branch_exists_locally:
             # Branch exists locally, just checkout
-            checkout_result = subprocess.run(
-                ['git', 'checkout', branch_name],
-                capture_output=True, text=True, check=False
-            )
+            checkout_result = self.git_service.checkout(branch_name)
             
-            if checkout_result.returncode == 0:
+            if checkout_result.success:
                 # Pull latest changes
-                pull_result = subprocess.run(
-                    ['git', 'pull', 'origin', branch_name],
-                    capture_output=True, text=True, check=False
-                )
+                pull_result = self.git_service.pull("origin", branch_name)
                 
-                if pull_result.returncode != 0:
+                if not pull_result.success:
                     logger.warning(f"Could not pull latest changes: {pull_result.stderr}")
                 
                 return True, f"Checked out existing local branch '{branch_name}'"
@@ -279,12 +242,9 @@ class BranchManager:
                 return False, f"Failed to checkout local branch: {checkout_result.stderr}"
         else:
             # Branch doesn't exist locally, create from remote
-            checkout_result = subprocess.run(
-                ['git', 'checkout', '-b', branch_name, f'origin/{branch_name}'],
-                capture_output=True, text=True, check=False
-            )
+            checkout_result = self.git_service.checkout(f"origin/{branch_name}", create=True)
             
-            if checkout_result.returncode == 0:
+            if checkout_result.success:
                 return True, f"Created local branch '{branch_name}' from remote"
             else:
                 # Remote branch might not exist either
@@ -298,34 +258,22 @@ class BranchManager:
         logger.info(f"Creating new branch '{branch_name}' from '{base_branch}'")
         
         # Ensure we're on the base branch first
-        checkout_base = subprocess.run(
-            ['git', 'checkout', base_branch],
-            capture_output=True, text=True, check=False
-        )
+        checkout_base = self.git_service.checkout(base_branch)
         
-        if checkout_base.returncode != 0:
+        if not checkout_base.success:
             # Try to create base branch from origin
-            checkout_base = subprocess.run(
-                ['git', 'checkout', '-b', base_branch, f'origin/{base_branch}'],
-                capture_output=True, text=True, check=False
-            )
+            checkout_base = self.git_service.checkout(f"origin/{base_branch}", create=True)
             
-            if checkout_base.returncode != 0:
+            if not checkout_base.success:
                 return False, "", f"Failed to checkout base branch '{base_branch}': {checkout_base.stderr}"
         
         # Pull latest changes
-        pull_result = subprocess.run(
-            ['git', 'pull', 'origin', base_branch],
-            capture_output=True, text=True, check=False
-        )
+        pull_result = self.git_service.pull("origin", base_branch)
         
         # Create new branch
-        create_result = subprocess.run(
-            ['git', 'checkout', '-b', branch_name],
-            capture_output=True, text=True, check=False
-        )
+        create_result = self.git_service.checkout(branch_name, create=True)
         
-        if create_result.returncode == 0:
+        if create_result.success:
             logger.info(f"✅ Created new branch '{branch_name}'")
             return True, branch_name, "created"
         else:
@@ -365,24 +313,18 @@ class BranchManager:
             
             # Delete local branch
             if branch.exists_locally:
-                delete_local = subprocess.run(
-                    ['git', 'branch', '-D', branch.name],
-                    capture_output=True, text=True, check=False
-                )
+                delete_local = self.git_service.branch(name=branch.name, delete=True, force_delete=True)
                 
-                if delete_local.returncode == 0:
+                if delete_local.success:
                     logger.debug(f"Deleted local branch '{branch.name}'")
                 else:
                     logger.warning(f"Could not delete local branch: {delete_local.stderr}")
             
             # Delete remote branch
             if branch.exists_remotely:
-                delete_remote = subprocess.run(
-                    ['git', 'push', 'origin', '--delete', branch.name],
-                    capture_output=True, text=True, check=False
-                )
+                delete_remote = self.git_service.push("origin", f":{branch.name}")
                 
-                if delete_remote.returncode == 0:
+                if delete_remote.success:
                     logger.debug(f"Deleted remote branch '{branch.name}'")
                     deleted_count += 1
                 else:
