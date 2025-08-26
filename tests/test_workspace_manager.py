@@ -532,13 +532,20 @@ class TestWorkspaceManager:
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
-                ['git', 'stash', 'push', '-m', 'Auto-stash by claude-tasker'], 0, "Saved working directory", ""
+                ['git', 'stash', 'push', '-u', '-m', 'claude-tasker auto-stash at 2025-08-26 16:38:08'], 0, "Saved working directory", ""
             )
             
             result = workspace._stash_changes()
             
             assert result is True
-            mock_git.assert_called_once_with(['stash', 'push', '-m', 'Auto-stash by claude-tasker'])
+            # Verify the call was made with correct pattern
+            mock_git.assert_called_once()
+            call_args = mock_git.call_args[0][0]
+            assert call_args[0] == 'stash'
+            assert call_args[1] == 'push'
+            assert '-u' in call_args
+            assert '-m' in call_args
+            assert 'claude-tasker auto-stash' in ' '.join(call_args)
     
     def test_stash_changes_failure(self):
         """Test failing to stash changes."""
@@ -562,7 +569,7 @@ class TestWorkspaceManager:
             valid, message = workspace.validate_branch_for_issue(123)
             
             assert valid is True
-            assert "valid" in message.lower()
+            assert "correctly" in message.lower() or "matches" in message.lower()
     
     def test_validate_branch_for_issue_wrong_branch(self):
         """Test branch validation for wrong issue branch."""
@@ -860,7 +867,7 @@ class TestWorkspaceManager:
         
         with patch.object(workspace, '_run_git_command') as mock_git:
             mock_git.return_value = subprocess.CompletedProcess(
-                ['git', 'ls-remote', '--heads', 'origin', 'feature-branch'], 0, "", ""  # Empty output
+                ['git', 'show-ref', '--verify', '--quiet', 'refs/remotes/origin/feature-branch'], 1, "", ""  # Return code 1 = not found
             )
             
             is_pushed = workspace.is_branch_pushed("feature-branch")
@@ -926,4 +933,5 @@ class TestWorkspaceManager:
             # Verify cwd was passed to subprocess
             mock_run.assert_called_once()
             call_kwargs = mock_run.call_args[1]
-            assert call_kwargs.get('cwd') == "/custom/path"
+            cwd_value = call_kwargs.get('cwd')
+            assert str(cwd_value) == "/custom/path"

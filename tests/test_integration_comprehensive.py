@@ -96,7 +96,7 @@ class TestFullWorkflowIntegration(TestCase):
              patch.object(workflow.github_client, 'get_pr', return_value=self.mock_pr), \
              patch.object(workflow.github_client, 'get_pr_diff', return_value="diff --git a/auth.py..."), \
              patch.object(workflow.github_client, 'get_pr_files', return_value=["auth.py", "tests/test_auth.py"]), \
-             patch.object(workflow.prompt_builder, 'build_pr_review_prompt', return_value="Review prompt"), \
+             patch.object(workflow.prompt_builder, 'generate_pr_review_prompt', return_value="Review prompt"), \
              patch.object(workflow.prompt_builder, '_execute_review_with_claude') as mock_review, \
              patch.object(workflow.github_client, 'comment_on_pr', return_value=True):
             
@@ -117,7 +117,7 @@ class TestFullWorkflowIntegration(TestCase):
             # Verify all steps were executed
             workflow.github_client.get_pr.assert_called_once_with(456)
             workflow.github_client.get_pr_diff.assert_called_once_with(456)
-            workflow.prompt_builder.build_pr_review_prompt.assert_called_once()
+            workflow.prompt_builder.generate_pr_review_prompt.assert_called_once()
             mock_review.assert_called_once()
     
     def test_bug_analysis_to_issue_creation_workflow(self):
@@ -125,7 +125,7 @@ class TestFullWorkflowIntegration(TestCase):
         workflow = WorkflowLogic()
         
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
-             patch.object(workflow.prompt_builder, 'build_bug_analysis_prompt', return_value="Bug analysis prompt"), \
+             patch.object(workflow.prompt_builder, 'generate_bug_analysis_prompt', return_value="Bug analysis prompt"), \
              patch.object(workflow.prompt_builder, 'execute_llm_tool') as mock_execute, \
              patch.object(workflow.github_client, 'create_issue', return_value="https://github.com/test/repo/issues/789"):
             
@@ -175,7 +175,7 @@ Login fails consistently on mobile devices
             assert "https://github.com/test/repo/issues/789" in result.message
             
             # Verify all steps were executed
-            workflow.prompt_builder.build_bug_analysis_prompt.assert_called_once()
+            workflow.prompt_builder.generate_bug_analysis_prompt.assert_called_once()
             mock_execute.assert_called_once()
             workflow.github_client.create_issue.assert_called_once()
     
@@ -184,7 +184,7 @@ Login fails consistently on mobile devices
         workflow = WorkflowLogic()
         
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
-             patch.object(workflow.prompt_builder, 'build_feature_analysis_prompt', return_value="Feature analysis prompt"), \
+             patch.object(workflow.prompt_builder, 'generate_feature_analysis_prompt', return_value="Feature analysis prompt"), \
              patch.object(workflow.prompt_builder, 'execute_llm_tool') as mock_execute, \
              patch.object(workflow.github_client, 'create_issue', return_value="https://github.com/test/repo/issues/890"):
             
@@ -236,7 +236,7 @@ Medium (1-2 sprints)
             assert "https://github.com/test/repo/issues/890" in result.message
             
             # Verify all steps were executed
-            workflow.prompt_builder.build_feature_analysis_prompt.assert_called_once()
+            workflow.prompt_builder.generate_feature_analysis_prompt.assert_called_once()
             mock_execute.assert_called_once()
             workflow.github_client.create_issue.assert_called_once()
     
@@ -280,10 +280,10 @@ Medium (1-2 sprints)
         workflow = WorkflowLogic()
         
         # Test environment validation failure
-        with patch.object(workflow, 'validate_environment', return_value=(False, "Git not found")):
+        with patch.object(workflow, 'validate_environment', return_value=(False, "Environment validation failed")):
             result = workflow.process_single_issue(123)
             assert result.success is False
-            assert "git not found" in result.message.lower()
+            assert "environment validation failed" in result.message.lower()
         
         # Test issue not found
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
@@ -561,7 +561,7 @@ class TestPerformanceAndStressIntegration(TestCase):
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
              patch.object(workflow.github_client, 'get_issue', return_value=large_issue), \
              patch.object(workflow.workspace_manager, 'workspace_hygiene', return_value=True), \
-             patch.object(workflow.workspace_manager, 'create_timestamped_branch', return_value=(True, "issue-123-1234567890")), \
+             patch.object(workflow.workspace_manager, 'smart_branch_for_issue', return_value=(True, "issue-123-1234567890", "created")), \
              patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage:
             
             # Mock execution with large response

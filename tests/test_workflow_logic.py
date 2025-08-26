@@ -19,7 +19,8 @@ class TestWorkflowLogic:
         workflow = WorkflowLogic()
         
         with patch.object(workflow.github_client, 'get_issue') as mock_get_issue, \
-             patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage:
+             patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage, \
+             patch.object(workflow.workspace_manager, 'smart_branch_for_issue') as mock_branch:
             
             # Mock issue data
             issue_data = IssueData(
@@ -32,6 +33,9 @@ class TestWorkflowLogic:
                 state="open"
             )
             mock_get_issue.return_value = issue_data
+            
+            # Mock branch setup
+            mock_branch.return_value = (True, "issue-316-1234567890", "created")
             
             # Mock two-stage execution result
             mock_two_stage.return_value = TwoStageResult(
@@ -119,7 +123,8 @@ class TestWorkflowLogic:
         workflow = WorkflowLogic()
         
         with patch.object(workflow.github_client, 'get_issue') as mock_get_issue, \
-             patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage:
+             patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage, \
+             patch.object(workflow.workspace_manager, 'smart_branch_for_issue') as mock_smart_branch:
             
             # Mock issue data
             issue_data = IssueData(
@@ -132,6 +137,9 @@ class TestWorkflowLogic:
                 state="open"
             )
             mock_get_issue.return_value = issue_data
+            
+            # Mock branch setup
+            mock_smart_branch.return_value = (True, "issue-316-1234567890", "created")
             
             # Mock two-stage execution with audit and implement phases
             mock_two_stage.return_value = TwoStageResult(

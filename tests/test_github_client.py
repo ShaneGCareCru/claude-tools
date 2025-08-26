@@ -411,7 +411,8 @@ class TestGitHubClient(TestCase):
             {'body': 'PR looks good!\nAll tests passing\nReady to merge'}
         ]
         
-        result = self.client.comment_on_pr(456, "PR looks good!\nDifferent assessment")
+        # Use exact same first 3 lines to trigger duplicate detection
+        result = self.client.comment_on_pr(456, "PR looks good!\nAll tests passing\nReady to merge\nAdditional content")
         
         self.assertTrue(result)
         mock_run_gh.assert_not_called()

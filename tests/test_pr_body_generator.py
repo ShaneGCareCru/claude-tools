@@ -523,7 +523,9 @@ modified"""
         checklist = self.generator._generate_test_checklist(diff_config)
         
         self.assertIn("Verify dependency installation", checklist)
-        self.assertIn("Verify configuration changes", checklist)
+        # Since requirements.txt is present, it goes to dependency path, not config changes
+        self.assertIn("Test requirements.txt changes", checklist)
+        self.assertIn("Test config.yml changes", checklist)
     
     def test_generate_changes_section_empty(self):
         """Test changes section generation with empty diff."""
