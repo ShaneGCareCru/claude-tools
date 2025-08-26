@@ -1,14 +1,13 @@
 """Prompt building module implementing two-stage execution and Lyra-Dev framework."""
 
 import json
-import subprocess
 import tempfile
 from typing import Dict, Optional, Any
 from pathlib import Path
 from .github_client import IssueData, PRData
 from .logging_config import get_logger
 from .prompt_models import ExecutionOptions, PromptContext, LLMResult, TwoStageResult
-from .services.command_executor import CommandExecutor
+from .services.command_executor import CommandExecutor, CommandErrorType
 import logging
 
 logger = get_logger(__name__)
@@ -1565,6 +1564,13 @@ Return ONLY the optimized prompt text that Claude will execute - no wrapper comm
                         stdout=result.stdout,
                         tool='claude'
                     )
+                elif result.error_type == CommandErrorType.TIMEOUT:
+                    logger.error("Claude review command timed out")
+                    return LLMResult(
+                        success=False,
+                        error="Claude review command timed out",
+                        tool='claude'
+                    )
                 else:
                     logger.error(f"Claude review failed with return code {result.returncode}")
                     logger.error(f"stderr: {result.stderr[:500]}")
@@ -1581,14 +1587,6 @@ Return ONLY the optimized prompt text that Claude will execute - no wrapper comm
             finally:
                 # Clean up temp file
                 Path(prompt_file).unlink(missing_ok=True)
-                
-        except subprocess.TimeoutExpired:
-            logger.error("Claude review command timed out")
-            return LLMResult(
-                success=False,
-                error="Claude review command timed out after 20 minutes",
-                tool='claude'
-            )
         except Exception as e:
             logger.error(f"Error executing Claude review: {e}")
             return LLMResult(
