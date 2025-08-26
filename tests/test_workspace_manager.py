@@ -410,7 +410,7 @@ class TestWorkspaceManager:
         """Test WorkspaceManager initialization with custom parameters."""
         workspace = WorkspaceManager(cwd="/custom/path", branch_strategy="always_new")
         
-        assert workspace.cwd == "/custom/path"
+        assert str(workspace.cwd) == "/custom/path"
         assert workspace.branch_strategy == "always_new"
     
     def test_is_interactive_detection(self):

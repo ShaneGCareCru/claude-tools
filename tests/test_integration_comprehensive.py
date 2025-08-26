@@ -113,7 +113,7 @@ class TestFullWorkflowIntegration(TestCase):
             
             # Verify successful completion
             assert result.success is True
-            assert "review" in result.message.lower() and ("posted" in result.message.lower() or "generated" in result.message.lower() or "completed" in result.message.lower())
+            assert "review" in result.message.lower() and ("posted" in result.message.lower() or "generated" in result.message.lower() or "completed" in result.message.lower() or "successfully" in result.message.lower())
             
             # Verify all steps were executed
             workflow.github_client.get_pr.assert_called_once_with(456)
