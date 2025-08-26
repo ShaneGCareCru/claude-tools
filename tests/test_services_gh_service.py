@@ -285,12 +285,15 @@ class TestGhService:
     
     def test_comment_on_issue_duplicate_prevention(self):
         """Test duplicate comment prevention."""
+        # Test the case where the exact same comment exists
+        comment_text = "This is a long enough comment to be detected as a duplicate"
         existing_comments = [
-            {"body": "Test comment\n\nSome more text"}
+            {"body": comment_text}  # Exact same comment
         ]
         self.gh_service.get_issue_comments = Mock(return_value=existing_comments)
         
-        success = self.gh_service.comment_on_issue(123, "Test comment")
+        # Post the same comment (signature should match exactly)
+        success = self.gh_service.comment_on_issue(123, comment_text)
         
         # Should not call execute since it's a duplicate
         self.mock_executor.execute.assert_not_called()
