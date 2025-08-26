@@ -8,7 +8,7 @@ from unittest.mock import patch, Mock, mock_open, call
 
 from src.claude_tasker.workflow_logic import WorkflowLogic, WorkflowResult
 from src.claude_tasker.github_client import IssueData, PRData
-from src.claude_tasker.prompt_models import TwoStageResult
+from src.claude_tasker.prompt_models import TwoStageResult, LLMResult
 
 
 class TestWorkflowLogic:
@@ -19,7 +19,8 @@ class TestWorkflowLogic:
         workflow = WorkflowLogic()
         
         with patch.object(workflow.github_client, 'get_issue') as mock_get_issue, \
-             patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage:
+             patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage, \
+             patch.object(workflow.workspace_manager, 'smart_branch_for_issue') as mock_branch:
             
             # Mock issue data
             issue_data = IssueData(
@@ -32,6 +33,9 @@ class TestWorkflowLogic:
                 state="open"
             )
             mock_get_issue.return_value = issue_data
+            
+            # Mock branch setup
+            mock_branch.return_value = (True, "issue-316-1234567890", "created")
             
             # Mock two-stage execution result
             mock_two_stage.return_value = TwoStageResult(
@@ -119,7 +123,8 @@ class TestWorkflowLogic:
         workflow = WorkflowLogic()
         
         with patch.object(workflow.github_client, 'get_issue') as mock_get_issue, \
-             patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage:
+             patch.object(workflow.prompt_builder, 'execute_two_stage_prompt') as mock_two_stage, \
+             patch.object(workflow.workspace_manager, 'smart_branch_for_issue') as mock_smart_branch:
             
             # Mock issue data
             issue_data = IssueData(
@@ -132,6 +137,9 @@ class TestWorkflowLogic:
                 state="open"
             )
             mock_get_issue.return_value = issue_data
+            
+            # Mock branch setup
+            mock_smart_branch.return_value = (True, "issue-316-1234567890", "created")
             
             # Mock two-stage execution with audit and implement phases
             mock_two_stage.return_value = TwoStageResult(
@@ -302,3 +310,356 @@ class TestWorkflowLogic:
             git_calls = [call.args[0] for call in mock_git.call_args_list]
             checkout_calls = [call for call in git_calls if 'checkout' in ' '.join(call) and 'issue-316-1234567890' in ' '.join(call)]
             assert len(checkout_calls) > 0
+    
+    def test_initialization_with_defaults(self):
+        """Test WorkflowLogic initialization with default parameters."""
+        with patch.object(WorkflowLogic, '_detect_default_branch', return_value='main'), \
+             patch.object(WorkflowLogic, '_load_claude_md', return_value='CLAUDE.md content'):
+            
+            workflow = WorkflowLogic()
+            
+            assert workflow.timeout_between_tasks == 10.0
+            assert workflow.coder == "claude"
+            assert workflow.branch_strategy == "reuse"
+            assert workflow.base_branch == "main"
+            assert workflow.claude_md_content == 'CLAUDE.md content'
+    
+    def test_initialization_with_custom_params(self):
+        """Test WorkflowLogic initialization with custom parameters."""
+        with patch.object(WorkflowLogic, '_detect_default_branch', return_value='main'), \
+             patch.object(WorkflowLogic, '_load_claude_md', return_value=''):
+            
+            workflow = WorkflowLogic(
+                timeout_between_tasks=5.0,
+                interactive_mode=True,
+                coder="llm",
+                base_branch="develop",
+                branch_strategy="always_new"
+            )
+            
+            assert workflow.timeout_between_tasks == 5.0
+            assert workflow.interactive_mode is True
+            assert workflow.coder == "llm"
+            assert workflow.base_branch == "develop"
+            assert workflow.branch_strategy == "always_new"
+    
+    def test_detect_default_branch_github_success(self):
+        """Test default branch detection from GitHub API."""
+        with patch.object(WorkflowLogic, '_load_claude_md', return_value=''):
+            workflow = WorkflowLogic.__new__(WorkflowLogic)  # Create without __init__
+            workflow.github_client = Mock()
+            workflow.workspace_manager = Mock()
+            
+            workflow.github_client.get_default_branch.return_value = "main"
+            
+            result = workflow._detect_default_branch()
+            
+            assert result == "main"
+            workflow.github_client.get_default_branch.assert_called_once()
+            workflow.workspace_manager.detect_main_branch.assert_not_called()
+    
+    def test_detect_default_branch_github_fallback(self):
+        """Test default branch detection fallback to workspace manager."""
+        workflow = WorkflowLogic.__new__(WorkflowLogic)  # Create without __init__
+        workflow.github_client = Mock()
+        workflow.workspace_manager = Mock()
+        
+        workflow.github_client.get_default_branch.return_value = None
+        workflow.workspace_manager.detect_main_branch.return_value = "master"
+        
+        result = workflow._detect_default_branch()
+        
+        assert result == "master"
+        workflow.github_client.get_default_branch.assert_called_once()
+        workflow.workspace_manager.detect_main_branch.assert_called_once()
+    
+    def test_load_claude_md_exists(self):
+        """Test loading CLAUDE.md when file exists."""
+        workflow = WorkflowLogic.__new__(WorkflowLogic)
+        
+        with patch('pathlib.Path.exists', return_value=True), \
+             patch('pathlib.Path.read_text', return_value='# CLAUDE.md\nProject context'):
+            
+            content = workflow._load_claude_md()
+            
+            assert content == '# CLAUDE.md\nProject context'
+    
+    def test_load_claude_md_missing(self):
+        """Test loading CLAUDE.md when file doesn't exist."""
+        workflow = WorkflowLogic.__new__(WorkflowLogic)
+        
+        with patch('pathlib.Path.exists', return_value=False):
+            
+            content = workflow._load_claude_md()
+            
+            assert content == ""
+    
+    def test_load_claude_md_read_error(self):
+        """Test loading CLAUDE.md with read error."""
+        workflow = WorkflowLogic.__new__(WorkflowLogic)
+        
+        with patch('pathlib.Path.exists', return_value=True), \
+             patch('pathlib.Path.read_text', side_effect=Exception("Read error")):
+            
+            content = workflow._load_claude_md()
+            
+            assert content == ""
+    
+    def test_validate_environment_success(self):
+        """Test environment validation success."""
+        workflow = WorkflowLogic()
+        
+        mock_results = {
+            'valid': True,
+            'errors': [],
+            'warnings': [],
+            'tool_status': {}
+        }
+        
+        with patch.object(workflow.env_validator, 'validate_all_dependencies', return_value=mock_results):
+            
+            valid, message = workflow.validate_environment()
+            
+            assert valid is True
+            assert message == "Environment validation passed"
+    
+    def test_validate_environment_failure(self):
+        """Test environment validation failure."""
+        workflow = WorkflowLogic()
+        
+        mock_results = {
+            'valid': False,
+            'errors': ['Git not found'],
+            'warnings': [],
+            'tool_status': {}
+        }
+        
+        with patch.object(workflow.env_validator, 'validate_all_dependencies', return_value=mock_results), \
+             patch.object(workflow.env_validator, 'format_validation_report', return_value='Validation failed report'):
+            
+            valid, message = workflow.validate_environment()
+            
+            assert valid is False
+            assert message == 'Validation failed report'
+    
+    def test_process_issue_range_timeout_between_issues(self):
+        """Test issue range processing applies timeout between issues."""
+        workflow = WorkflowLogic(timeout_between_tasks=1.0)
+        
+        with patch.object(workflow, 'process_single_issue') as mock_process, \
+             patch('time.sleep') as mock_sleep:
+            
+            mock_process.return_value = WorkflowResult(
+                success=True,
+                message="Success",
+                issue_number=100
+            )
+            
+            results = workflow.process_issue_range(100, 102, prompt_only=True)
+            
+            # Should process 3 issues
+            assert len(results) == 3
+            assert mock_process.call_count == 3
+            
+            # Should sleep 2 times (between 3 issues)
+            assert mock_sleep.call_count == 2
+            mock_sleep.assert_called_with(1.0)
+    
+    def test_process_issue_range_no_timeout_on_last_issue(self):
+        """Test issue range processing doesn't timeout after last issue."""
+        workflow = WorkflowLogic(timeout_between_tasks=1.0)
+        
+        with patch.object(workflow, 'process_single_issue') as mock_process, \
+             patch('time.sleep') as mock_sleep:
+            
+            mock_process.return_value = WorkflowResult(success=True, message="Success", issue_number=100)
+            
+            results = workflow.process_issue_range(100, 100, prompt_only=True)  # Single issue
+            
+            assert len(results) == 1
+            assert mock_process.call_count == 1
+            assert mock_sleep.call_count == 0  # No timeout for single issue
+    
+    def test_review_pr_success(self):
+        """Test PR review functionality."""
+        workflow = WorkflowLogic()
+        
+        mock_pr = PRData(
+            number=123,
+            title="Test PR",
+            body="PR description",
+            head_ref="feature-branch",
+            base_ref="main",
+            author="contributor",
+            additions=10,
+            deletions=5,
+            changed_files=2,
+            url="https://github.com/owner/repo/pull/123"
+        )
+        
+        with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
+             patch.object(workflow.github_client, 'get_pr', return_value=mock_pr), \
+             patch.object(workflow.github_client, 'get_pr_diff', return_value="diff content"), \
+             patch.object(workflow.prompt_builder, 'generate_pr_review_prompt', return_value="Review prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'result': 'PR review generated'})):
+            
+            result = workflow.review_pr(123, prompt_only=True)
+            
+            assert result.success is True
+            assert ("PR review generated" in result.message or "review" in result.message.lower())
+    
+    def test_review_pr_not_found(self):
+        """Test PR review when PR not found."""
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
+             patch.object(workflow.github_client, 'get_pr', return_value=None):
+            
+            result = workflow.review_pr(999)
+            
+            assert result.success is False
+            assert ("not found" in result.message or "failed to fetch" in result.message.lower())
+    
+    def test_review_pr_environment_validation_fails(self):
+        """Test PR review when environment validation fails."""
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow, 'validate_environment', return_value=(False, "Validation failed")):
+            
+            result = workflow.review_pr(123)
+            
+            assert result.success is False
+            assert "validation failed" in result.message.lower()
+    
+    def test_analyze_bug_success(self):
+        """Test bug analysis functionality."""
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
+             patch.object(workflow.prompt_builder, 'generate_bug_analysis_prompt', return_value="Bug analysis prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'issue_title': 'Bug: Auth failure', 'issue_body': 'Detailed bug analysis'})), \
+             patch.object(workflow.github_client, 'create_issue', return_value='https://github.com/owner/repo/issues/456'):
+            
+            result = workflow.analyze_bug("Login not working", prompt_only=False)
+            
+            assert result.success is True
+            assert ("Issue created" in result.message or "issue created" in result.message.lower())
+            assert "https://github.com/owner/repo/issues/456" in result.message
+    
+    def test_analyze_bug_prompt_only(self):
+        """Test bug analysis in prompt-only mode."""
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
+             patch.object(workflow.prompt_builder, 'generate_bug_analysis_prompt', return_value="Bug analysis prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'issue_title': 'Bug: Auth failure', 'issue_body': 'Analysis'})):
+            
+            result = workflow.analyze_bug("Login not working", prompt_only=True)
+            
+            assert result.success is True
+            assert "Bug analysis completed" in result.message
+    
+    def test_analyze_bug_llm_execution_fails(self):
+        """Test bug analysis when LLM execution fails."""
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
+             patch.object(workflow.prompt_builder, 'generate_bug_analysis_prompt', return_value="Bug analysis prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=False, error='Failed to analyze')):
+            
+            result = workflow.analyze_bug("Login not working")
+            
+            assert result.success is False
+            assert "Failed to analyze bug" in result.message
+    
+    def test_analyze_feature_success(self):
+        """Test feature analysis functionality."""
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
+             patch.object(workflow.prompt_builder, 'generate_feature_analysis_prompt', return_value="Feature analysis prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'issue_title': 'Feature: CSV export', 'issue_body': 'Feature analysis'})), \
+             patch.object(workflow.github_client, 'create_issue', return_value='https://github.com/owner/repo/issues/789'):
+            
+            result = workflow.analyze_feature("Add CSV export", prompt_only=False)
+            
+            assert result.success is True
+            assert ("Issue created" in result.message or "issue created" in result.message.lower())
+    
+    def test_analyze_feature_prompt_only(self):
+        """Test feature analysis in prompt-only mode."""
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
+             patch.object(workflow.prompt_builder, 'generate_feature_analysis_prompt', return_value="Feature prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'issue_title': 'Feature: Export', 'issue_body': 'Analysis'})):
+            
+            result = workflow.analyze_feature("Add export", prompt_only=True)
+            
+            assert result.success is True
+            assert "Feature analysis completed" in result.message
+    
+    def test_analyze_feature_create_issue_fails(self):
+        """Test feature analysis when issue creation fails."""
+        workflow = WorkflowLogic()
+        
+        with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
+             patch.object(workflow.prompt_builder, 'generate_feature_analysis_prompt', return_value="Feature prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'issue_title': 'Feature', 'issue_body': 'Body'})), \
+             patch.object(workflow.github_client, 'create_issue', return_value=None):
+            
+            result = workflow.analyze_feature("Add feature")
+            
+            assert result.success is False
+            assert ("Failed to create issue" in result.message or "failed to create" in result.message.lower())
+    
+    def test_deduplicate_review_content(self):
+        """Test review content deduplication."""
+        workflow = WorkflowLogic()
+        
+        content = """
+        This is a great PR!
+        
+        **Summary:**
+        - Good changes
+        - Well tested
+        
+        **Summary:**
+        - Different summary
+        - Also good
+        """
+        
+        deduplicated = workflow._deduplicate_review_content(content)
+        
+        # Should remove duplicate sections
+        summary_count = deduplicated.count("**Summary:**")
+        assert summary_count == 1
+    
+    def test_workflow_result_dataclass(self):
+        """Test WorkflowResult dataclass functionality."""
+        result = WorkflowResult(
+            success=True,
+            message="Test message",
+            issue_number=123,
+            pr_url="https://github.com/owner/repo/pull/456",
+            branch_name="feature-branch",
+            error_details="No errors"
+        )
+        
+        assert result.success is True
+        assert result.message == "Test message"
+        assert result.issue_number == 123
+        assert result.pr_url == "https://github.com/owner/repo/pull/456"
+        assert result.branch_name == "feature-branch"
+        assert result.error_details == "No errors"
+    
+    def test_workflow_result_minimal(self):
+        """Test WorkflowResult with minimal required fields."""
+        result = WorkflowResult(success=False, message="Error occurred")
+        
+        assert result.success is False
+        assert result.message == "Error occurred"
+        assert result.issue_number is None
+        assert result.pr_url is None
+        assert result.branch_name is None
+        assert result.error_details is None

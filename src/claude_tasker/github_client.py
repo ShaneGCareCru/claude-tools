@@ -113,7 +113,7 @@ class GitHubClient:
             return IssueData(
                 number=data['number'],
                 title=data['title'],
-                body=data.get('body', ''),
+                body=data.get('body') or '',
                 labels=[label['name'] for label in data.get('labels', [])],
                 url=data['url'],
                 author=data['author']['login'],
@@ -138,7 +138,7 @@ class GitHubClient:
             return PRData(
                 number=data['number'],
                 title=data['title'], 
-                body=data.get('body', ''),
+                body=data.get('body') or '',
                 head_ref=data['headRefName'],
                 base_ref=data['baseRefName'],
                 author=data['author']['login'],

@@ -90,6 +90,7 @@ class TestWorkflowLogicExtended:
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
+        mock_dependencies['workspace_manager'].smart_branch_for_issue.return_value = (True, "issue-42-123456", "created")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
         mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
@@ -114,6 +115,7 @@ class TestWorkflowLogicExtended:
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
+        mock_dependencies['workspace_manager'].smart_branch_for_issue.return_value = (True, "issue-42-123456", "created")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
         mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
@@ -139,6 +141,7 @@ class TestWorkflowLogicExtended:
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
+        mock_dependencies['workspace_manager'].smart_branch_for_issue.return_value = (True, "issue-42-123456", "created")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
         mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
@@ -165,6 +168,7 @@ class TestWorkflowLogicExtended:
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
+        mock_dependencies['workspace_manager'].smart_branch_for_issue.return_value = (True, "issue-42-123456", "created")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
         mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
@@ -189,6 +193,7 @@ class TestWorkflowLogicExtended:
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
+        mock_dependencies['workspace_manager'].smart_branch_for_issue.return_value = (True, "issue-42-123456", "created")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
         mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
@@ -215,6 +220,7 @@ class TestWorkflowLogicExtended:
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
+        mock_dependencies['workspace_manager'].smart_branch_for_issue.return_value = (True, "issue-42-123456", "created")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
         mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)
@@ -242,6 +248,7 @@ class TestWorkflowLogicExtended:
         )
         mock_dependencies['github_client'].get_issue.return_value = issue_data
         mock_dependencies['workspace_manager'].validate_branch_for_issue.return_value = (True, "Valid branch")
+        mock_dependencies['workspace_manager'].smart_branch_for_issue.return_value = (True, "issue-42-123456", "created")
         mock_dependencies['workspace_manager'].workspace_hygiene.return_value = True
         mock_dependencies['workspace_manager'].create_timestamped_branch.return_value = (True, "issue-42-123456")
         mock_dependencies['workspace_manager'].get_branch_and_status.return_value = ("main", True)

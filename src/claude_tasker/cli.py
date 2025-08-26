@@ -17,6 +17,8 @@ logger = get_logger(__name__)
 def parse_issue_range(issue_arg: str) -> tuple[Optional[int], Optional[int]]:
     """Parse issue number or range (e.g., '123' or '123-125')."""
     try:
+        if not issue_arg:
+            return None, None
         if '-' in issue_arg:
             start_str, end_str = issue_arg.split('-', 1)
             start = int(start_str.strip())
@@ -27,7 +29,7 @@ def parse_issue_range(issue_arg: str) -> tuple[Optional[int], Optional[int]]:
         else:
             issue_num = int(issue_arg.strip())
             return issue_num, issue_num
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, TypeError):
         return None, None
 
 
@@ -53,7 +55,7 @@ def extract_pr_number(pr_url: str) -> Optional[int]:
             return int(pr_url)
             
         return None
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, TypeError):
         return None
 
 
