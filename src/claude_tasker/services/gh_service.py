@@ -86,7 +86,7 @@ class GhService:
     def _add_op_marker(self, content: str, op_id: Optional[str] = None) -> str:
         """Add operation marker to content for idempotency."""
         if op_id:
-            marker = f"{self.op_marker}-{op_id}"
+            marker = f"<!-- claude-tasker-op-{op_id} -->"
         else:
             marker = self.op_marker
         return f"{content}\n\n{marker}"
@@ -94,7 +94,7 @@ class GhService:
     def _has_op_marker(self, content: str, op_id: Optional[str] = None) -> bool:
         """Check if content has operation marker."""
         if op_id:
-            marker = f"{self.op_marker}-{op_id}"
+            marker = f"<!-- claude-tasker-op-{op_id} -->"
         else:
             marker = self.op_marker
         return marker in content

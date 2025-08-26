@@ -202,7 +202,8 @@ class GitService:
     
     def current_branch(self, cwd: Optional[str] = None) -> Optional[str]:
         """Get current branch name."""
-        result = self.rev_parse("--abbrev-ref HEAD", cwd=cwd)
+        cmd = ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+        result = self.executor.execute(cmd, cwd=cwd)
         if result.success:
             return result.stdout.strip()
         return None
