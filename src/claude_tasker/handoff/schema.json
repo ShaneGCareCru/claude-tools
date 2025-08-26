@@ -1,0 +1,204 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schema.claude-tasker.dev/handoff/v1",
+  "title": "Claude Tasker Handoff Plan Schema",
+  "description": "Schema for claude-tasker handoff plans with actions and deduplication strategies",
+  "type": "object",
+  "required": ["version", "timestamp", "op_id", "context", "actions"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO timestamp when plan was created"
+    },
+    "op_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "minLength": 8,
+      "maxLength": 64,
+      "description": "Unique operation identifier for idempotency"
+    },
+    "context": {
+      "type": "object",
+      "description": "Context information that led to this plan",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["issue", "pr", "bug_analysis", "manual"]
+        },
+        "issue_number": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "pr_number": {
+          "type": ["integer", "null"], 
+          "minimum": 1
+        },
+        "branch": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "repository": {
+          "type": ["string", "null"],
+          "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+        },
+        "description": {
+          "type": ["string", "null"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"type": {"const": "issue"}}},
+          "then": {"required": ["issue_number"]}
+        },
+        {
+          "if": {"properties": {"type": {"const": "pr"}}},
+          "then": {"required": ["pr_number"]}
+        }
+      ]
+    },
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type", "dedupe_strategy"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["create_issue", "create_pr", "comment_issue", "comment_pr"]
+          },
+          "dedupe_strategy": {
+            "type": "object",
+            "required": ["method"],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": ["dedupe_marker", "by_title_hash", "by_content_signature", "none"]
+              },
+              "marker": {
+                "type": ["string", "null"],
+                "description": "Custom marker for dedupe_marker method"
+              },
+              "signature_lines": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "default": 3,
+                "description": "Number of lines to use for content signature"
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"type": {"const": "create_issue"}}},
+            "then": {
+              "required": ["title", "body"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 65536
+                },
+                "labels": {
+                  "type": ["array", "null"],
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50
+                  },
+                  "maxItems": 20
+                },
+                "assignees": {
+                  "type": ["array", "null"],
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9-]{0,38}[a-zA-Z0-9])?$"
+                  },
+                  "maxItems": 10
+                }
+              }
+            }
+          },
+          {
+            "if": {"properties": {"type": {"const": "create_pr"}}},
+            "then": {
+              "required": ["title", "body", "head_branch"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 65536
+                },
+                "head_branch": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "base_branch": {
+                  "type": ["string", "null"],
+                  "default": "main"
+                },
+                "draft": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          },
+          {
+            "if": {"properties": {"type": {"const": "comment_issue"}}},
+            "then": {
+              "required": ["issue_number", "comment"],
+              "properties": {
+                "issue_number": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "comment": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 65536
+                }
+              }
+            }
+          },
+          {
+            "if": {"properties": {"type": {"const": "comment_pr"}}},
+            "then": {
+              "required": ["pr_number", "comment"],
+              "properties": {
+                "pr_number": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "comment": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 65536
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
