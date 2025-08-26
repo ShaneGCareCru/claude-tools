@@ -411,7 +411,9 @@ class TestWorkspaceManager:
         workspace = WorkspaceManager(cwd="/custom/path", branch_strategy="always_new")
         
         assert str(workspace.cwd) == "/custom/path"
-        assert workspace.branch_strategy == "always_new"
+        # branch_strategy is passed to BranchManager, not stored as attribute
+        from src.claude_tasker.branch_manager import BranchStrategy
+        assert workspace.branch_manager.strategy == BranchStrategy.ALWAYS_NEW
     
     def test_is_interactive_detection(self):
         """Test interactive mode detection."""
