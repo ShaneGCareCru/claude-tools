@@ -8,7 +8,7 @@ from unittest.mock import patch, Mock, mock_open, call
 
 from src.claude_tasker.workflow_logic import WorkflowLogic, WorkflowResult
 from src.claude_tasker.github_client import IssueData, PRData
-from src.claude_tasker.prompt_models import TwoStageResult
+from src.claude_tasker.prompt_models import TwoStageResult, LLMResult
 
 
 class TestWorkflowLogic:
@@ -500,8 +500,8 @@ class TestWorkflowLogic:
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
              patch.object(workflow.github_client, 'get_pr', return_value=mock_pr), \
              patch.object(workflow.github_client, 'get_pr_diff', return_value="diff content"), \
-             patch.object(workflow.prompt_builder, 'build_pr_review_prompt', return_value="Review prompt"), \
-             patch.object(workflow.prompt_builder, 'execute_llm_tool', return_value={'result': 'PR review generated'}):
+             patch.object(workflow.prompt_builder, 'generate_pr_review_prompt', return_value="Review prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'result': 'PR review generated'})):
             
             result = workflow.review_pr(123, prompt_only=True)
             
@@ -536,8 +536,8 @@ class TestWorkflowLogic:
         workflow = WorkflowLogic()
         
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
-             patch.object(workflow.prompt_builder, 'build_bug_analysis_prompt', return_value="Bug analysis prompt"), \
-             patch.object(workflow.prompt_builder, 'execute_llm_tool', return_value={'issue_title': 'Bug: Auth failure', 'issue_body': 'Detailed bug analysis'}), \
+             patch.object(workflow.prompt_builder, 'generate_bug_analysis_prompt', return_value="Bug analysis prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'issue_title': 'Bug: Auth failure', 'issue_body': 'Detailed bug analysis'})), \
              patch.object(workflow.github_client, 'create_issue', return_value='https://github.com/owner/repo/issues/456'):
             
             result = workflow.analyze_bug("Login not working", prompt_only=False)
@@ -551,8 +551,8 @@ class TestWorkflowLogic:
         workflow = WorkflowLogic()
         
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
-             patch.object(workflow.prompt_builder, 'build_bug_analysis_prompt', return_value="Bug analysis prompt"), \
-             patch.object(workflow.prompt_builder, 'execute_llm_tool', return_value={'issue_title': 'Bug: Auth failure', 'issue_body': 'Analysis'}):
+             patch.object(workflow.prompt_builder, 'generate_bug_analysis_prompt', return_value="Bug analysis prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'issue_title': 'Bug: Auth failure', 'issue_body': 'Analysis'})):
             
             result = workflow.analyze_bug("Login not working", prompt_only=True)
             
@@ -564,8 +564,8 @@ class TestWorkflowLogic:
         workflow = WorkflowLogic()
         
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
-             patch.object(workflow.prompt_builder, 'build_bug_analysis_prompt', return_value="Bug analysis prompt"), \
-             patch.object(workflow.prompt_builder, 'execute_llm_tool', return_value=None):
+             patch.object(workflow.prompt_builder, 'generate_bug_analysis_prompt', return_value="Bug analysis prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=False, error='Failed to analyze')):
             
             result = workflow.analyze_bug("Login not working")
             
@@ -577,8 +577,8 @@ class TestWorkflowLogic:
         workflow = WorkflowLogic()
         
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
-             patch.object(workflow.prompt_builder, 'build_feature_analysis_prompt', return_value="Feature analysis prompt"), \
-             patch.object(workflow.prompt_builder, 'execute_llm_tool', return_value={'issue_title': 'Feature: CSV export', 'issue_body': 'Feature analysis'}), \
+             patch.object(workflow.prompt_builder, 'generate_feature_analysis_prompt', return_value="Feature analysis prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'issue_title': 'Feature: CSV export', 'issue_body': 'Feature analysis'})), \
              patch.object(workflow.github_client, 'create_issue', return_value='https://github.com/owner/repo/issues/789'):
             
             result = workflow.analyze_feature("Add CSV export", prompt_only=False)
@@ -591,8 +591,8 @@ class TestWorkflowLogic:
         workflow = WorkflowLogic()
         
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
-             patch.object(workflow.prompt_builder, 'build_feature_analysis_prompt', return_value="Feature prompt"), \
-             patch.object(workflow.prompt_builder, 'execute_llm_tool', return_value={'issue_title': 'Feature: Export', 'issue_body': 'Analysis'}):
+             patch.object(workflow.prompt_builder, 'generate_feature_analysis_prompt', return_value="Feature prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'issue_title': 'Feature: Export', 'issue_body': 'Analysis'})):
             
             result = workflow.analyze_feature("Add export", prompt_only=True)
             
@@ -604,8 +604,8 @@ class TestWorkflowLogic:
         workflow = WorkflowLogic()
         
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
-             patch.object(workflow.prompt_builder, 'build_feature_analysis_prompt', return_value="Feature prompt"), \
-             patch.object(workflow.prompt_builder, 'execute_llm_tool', return_value={'issue_title': 'Feature', 'issue_body': 'Body'}), \
+             patch.object(workflow.prompt_builder, 'generate_feature_analysis_prompt', return_value="Feature prompt"), \
+             patch.object(workflow.prompt_builder, 'build_with_claude', return_value=LLMResult(success=True, data={'issue_title': 'Feature', 'issue_body': 'Body'})), \
              patch.object(workflow.github_client, 'create_issue', return_value=None):
             
             result = workflow.analyze_feature("Add feature")

@@ -41,13 +41,13 @@ class TestPromptBuilder:
             assert result is not None
             assert result.success is True
             assert result.data is not None
-            # Check the result data - might be string or dict
-            if isinstance(result.data, str):
-                assert "success" in result.data
-            elif isinstance(result.data, dict):
+            # Check the result data - handle both string and dict cases
+            if isinstance(result.data, dict):
                 assert result.data["result"] == "success"
             else:
-                assert "success" in str(result.data)
+                # If it's a string (raw JSON), check it contains the expected content
+                data_str = str(result.data)
+                assert "success" in data_str
             
             # Verify command structure
             mock_run.assert_called_once()
@@ -502,6 +502,18 @@ class TestPromptBuilder:
         
         valid_prompt = """
         You are a senior software engineer implementing issue #123.
+        
+        # DECONSTRUCT
+        Breaking down the user authentication requirement into components.
+        
+        # DIAGNOSE
+        Identifying current gaps in the authentication system.
+        
+        # DEVELOP
+        Planning the implementation approach for auth module.
+        
+        # DELIVER
+        Implementing the authentication features following best practices.
         
         ## Context
         The issue requires adding user authentication.

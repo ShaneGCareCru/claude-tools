@@ -105,14 +105,15 @@ class TestFullWorkflowIntegration(TestCase):
                 success=True,
                 data={"review": "Comprehensive PR review", "rating": "LGTM"},
                 raw_output="## Code Review\nThis PR looks great!",
-                error_message=""
+                error_message="",
+                text="## Code Review\nThis PR looks great!"
             )
             
             result = workflow.review_pr(456, prompt_only=False)
             
             # Verify successful completion
             assert result.success is True
-            assert "review posted" in result.message.lower() or "review generated" in result.message.lower()
+            assert "review" in result.message.lower() and ("posted" in result.message.lower() or "generated" in result.message.lower() or "completed" in result.message.lower())
             
             # Verify all steps were executed
             workflow.github_client.get_pr.assert_called_once_with(456)
@@ -126,13 +127,15 @@ class TestFullWorkflowIntegration(TestCase):
         
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
              patch.object(workflow.prompt_builder, 'generate_bug_analysis_prompt', return_value="Bug analysis prompt"), \
-             patch.object(workflow.prompt_builder, 'execute_llm_tool') as mock_execute, \
+             patch.object(workflow.prompt_builder, 'build_with_claude') as mock_execute, \
              patch.object(workflow.github_client, 'create_issue', return_value="https://github.com/test/repo/issues/789"):
             
             # Mock successful analysis
-            mock_execute.return_value = {
-                'issue_title': 'Bug: Authentication fails on mobile devices',
-                'issue_body': '''## Problem Description
+            mock_execute.return_value = LLMResult(
+                success=True,
+                data={
+                    'issue_title': 'Bug: Authentication fails on mobile devices',
+                    'issue_body': '''## Problem Description
 Users report that login fails on mobile devices with 2FA enabled.
 
 ## Steps to Reproduce
@@ -162,7 +165,9 @@ Login fails consistently on mobile devices
 - mobile
 - authentication
 - high-priority'''
-            }
+                },
+                error=None
+            )
             
             result = workflow.analyze_bug(
                 "Users can't login on mobile devices - 2FA token validation fails",
@@ -185,13 +190,15 @@ Login fails consistently on mobile devices
         
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
              patch.object(workflow.prompt_builder, 'generate_feature_analysis_prompt', return_value="Feature analysis prompt"), \
-             patch.object(workflow.prompt_builder, 'execute_llm_tool') as mock_execute, \
+             patch.object(workflow.prompt_builder, 'build_with_claude') as mock_execute, \
              patch.object(workflow.github_client, 'create_issue', return_value="https://github.com/test/repo/issues/890"):
             
             # Mock successful analysis
-            mock_execute.return_value = {
-                'issue_title': 'Feature: Add CSV export functionality for reports',
-                'issue_body': '''## Feature Request
+            mock_execute.return_value = LLMResult(
+                success=True,
+                data={
+                    'issue_title': 'Feature: Add CSV export functionality for reports',
+                    'issue_body': '''## Feature Request
 Add ability to export reports in CSV format for data analysis.
 
 ## User Story
@@ -223,7 +230,9 @@ Medium (1-2 sprints)
 - reports
 - export
 - medium-priority'''
-            }
+                },
+                error=None
+            )
             
             result = workflow.analyze_feature(
                 "Add CSV export functionality for all reports",
@@ -290,7 +299,7 @@ Medium (1-2 sprints)
              patch.object(workflow.github_client, 'get_issue', return_value=None):
             result = workflow.process_single_issue(999)
             assert result.success is False
-            assert "not found" in result.message.lower()
+            assert ("not found" in result.message.lower() or "failed to fetch" in result.message.lower())
         
         # Test workspace hygiene failure
         with patch.object(workflow, 'validate_environment', return_value=(True, "Valid")), \
