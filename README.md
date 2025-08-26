@@ -20,33 +20,40 @@ Claude Tools provides a sophisticated task automation system that bridges Claude
 
 ## Installation
 
-### Prerequisites
+### 🚀 Quick Install (Recommended)
 
-**Core Requirements:**
-- **macOS** or **Linux** 
+**Download pre-built macOS binaries** - No Python or dependencies required!
+
+1. Go to [GitHub Releases](https://github.com/ShaneGCareCru/claude-tools/releases)
+2. Download the right binary for your Mac:
+   - **Apple Silicon (M1/M2/M3)**: `claude-tasker-arm64`
+   - **Intel Macs**: `claude-tasker-x86_64`
+3. Make it executable and install:
+
+```bash
+chmod +x claude-tasker-*
+sudo mv claude-tasker-* /usr/local/bin/claude-tasker
+claude-tasker --version
+```
+
+**That's it!** See [INSTALLATION.md](./INSTALLATION.md) for detailed instructions and troubleshooting.
+
+### Development Installation
+
+**Prerequisites:**
+- **Python 3.11+**
 - **GitHub CLI (`gh`)** - Authenticated with your GitHub account
 - **jq** - JSON processor
 - **git** - Version control
-
-**For Bash Implementation:**
-- **bash 4.0+**
-
-**For Python Implementation:**  
-- **Python 3.7+**
-
-**LLM Tools (choose one):**
-- **Claude CLI** - Primary recommendation for best performance
-- **llm** - Alternative tool, configured with OpenAI model
-
-### Quick Start
+- **Claude CLI** - For executing prompts
 
 ```bash
-# Clone the repository
+# Clone and install from source
 git clone https://github.com/ShaneGCareCru/claude-tools.git
 cd claude-tools
-
-# Make scripts executable  
-chmod +x claude-tasker claude-tasker-py
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
 
 # Optional: Add to PATH for global access
 echo 'export PATH="$PATH:'$(pwd)'"' >> ~/.bashrc
