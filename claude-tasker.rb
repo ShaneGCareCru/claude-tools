@@ -21,8 +21,8 @@ class ClaudeTasker < Formula
   end
 
   resource "pydantic" do
-    url "https://files.pythonhosted.org/packages/45/0f/27908242621b14e649a84e62b133de45f84c255eecb350ab02da7bdc4d8fb/pydantic-2.10.3.tar.gz"
-    sha256 "cb5ac360ce894ceacd69c403187900a02c4b20b693a9dd1d643e1effab9eadf9"
+    url "https://files.pythonhosted.org/packages/a9/b7/d9316d25776704b692f9a01329bce0e6a35dd41cc2b5cf36c3b496b56a7d/pydantic-2.10.2.tar.gz"
+    sha256 "2bc2d7f17232e0841cbba4641e65ba77c2153313c5e9b1636b38dbc2edb70e6"
   end
 
   resource "pydantic-core" do
