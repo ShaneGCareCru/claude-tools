@@ -8,6 +8,7 @@ from unittest.mock import patch, Mock, mock_open, MagicMock
 from src.claude_tasker.prompt_builder import PromptBuilder
 from src.claude_tasker.github_client import IssueData, PRData
 from src.claude_tasker.prompt_models import ExecutionOptions, PromptContext, LLMResult, TwoStageResult
+from src.claude_tasker.services.command_executor import CommandExecutor
 
 
 class TestPromptBuilder:
@@ -15,7 +16,8 @@ class TestPromptBuilder:
     
     def test_init(self):
         """Test PromptBuilder initialization."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         assert builder.lyra_dev_framework is not None
         assert "DECONSTRUCT" in builder.lyra_dev_framework
         assert "DIAGNOSE" in builder.lyra_dev_framework
@@ -24,7 +26,8 @@ class TestPromptBuilder:
     
     def test_execute_llm_tool_claude_success(self):
         """Test successful Claude execution."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(
@@ -54,7 +57,8 @@ class TestPromptBuilder:
     
     def test_execute_llm_tool_claude_with_execution(self):
         """Test Claude execution with execute mode."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(
@@ -88,7 +92,8 @@ class TestPromptBuilder:
     
     def test_execute_llm_tool_timeout_handling(self):
         """Test timeout handling in LLM execution."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(
@@ -108,7 +113,8 @@ class TestPromptBuilder:
     
     def test_execute_llm_tool_json_decode_error(self):
         """Test handling of invalid JSON responses."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(
@@ -130,7 +136,8 @@ class TestPromptBuilder:
     
     def test_generate_lyra_dev_prompt(self):
         """Test Lyra-Dev prompt generation."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         issue_data = IssueData(
             number=123,
@@ -163,7 +170,8 @@ class TestPromptBuilder:
     
     def test_validate_meta_prompt_valid(self):
         """Test validation of valid meta-prompt."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         valid_prompt = """
         This is a comprehensive prompt for implementation.
@@ -187,14 +195,16 @@ class TestPromptBuilder:
     
     def test_validate_meta_prompt_invalid_too_short(self):
         """Test validation rejects too-short meta-prompt."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         short_prompt = "Too short"
         assert builder.validate_meta_prompt(short_prompt) is False
     
     def test_validate_meta_prompt_invalid_missing_sections(self):
         """Test validation rejects meta-prompt missing required sections."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         incomplete_prompt = """
         This prompt is long enough but missing required sections.
@@ -208,7 +218,8 @@ class TestPromptBuilder:
     
     def test_validate_meta_prompt_invalid_problematic_patterns(self):
         """Test validation of optimized prompt with 4-D sections."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         valid_prompt = """
         # DECONSTRUCT
@@ -231,7 +242,8 @@ class TestPromptBuilder:
     
     def test_execute_two_stage_prompt_success(self):
         """Test successful two-stage prompt execution."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         task_data = {
             "issue_number": 123,
@@ -290,7 +302,8 @@ class TestPromptBuilder:
     
     def test_execute_two_stage_prompt_meta_failure(self):
         """Test two-stage execution when meta-prompt generation fails."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         task_data = {
             "issue_number": 123,
@@ -321,7 +334,8 @@ class TestPromptBuilder:
     
     def test_build_with_claude(self):
         """Test direct Claude prompt building."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         mock_result = LLMResult(success=True, data={"response": "Claude response"})
         
@@ -340,7 +354,8 @@ class TestPromptBuilder:
     
     def test_build_with_llm(self):
         """Test LLM tool prompt building."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         mock_result = LLMResult(success=True, data={"response": "LLM response"})
         
@@ -359,7 +374,8 @@ class TestPromptBuilder:
     
     def test_generate_pr_review_prompt(self):
         """Test PR review prompt generation."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         pr_data = PRData(
             number=456,
@@ -389,7 +405,8 @@ class TestPromptBuilder:
     
     def test_generate_bug_analysis_prompt(self):
         """Test bug analysis prompt generation."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         bug_description = "Tests are failing intermittently"
         claude_md_content = "# Guidelines"
@@ -411,7 +428,8 @@ class TestPromptBuilder:
     
     def test_large_prompt_handling(self):
         """Test handling of very large prompts."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         # Create a large prompt
         large_content = "x" * 500000  # 500KB prompt
@@ -439,7 +457,8 @@ class TestPromptBuilder:
     
     def test_generate_meta_prompt(self):
         """Test meta-prompt generation."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         task_data = {
             "issue_number": 123,
@@ -459,7 +478,8 @@ class TestPromptBuilder:
     
     def test_validate_meta_prompt_valid(self):
         """Test meta prompt validation with valid prompt."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         valid_prompt = """
         # Task Analysis
@@ -478,7 +498,8 @@ class TestPromptBuilder:
     
     def test_validate_meta_prompt_too_short(self):
         """Test meta prompt validation with too short prompt."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         short_prompt = "Short"
         
@@ -486,14 +507,16 @@ class TestPromptBuilder:
     
     def test_validate_meta_prompt_empty(self):
         """Test meta prompt validation with empty prompt."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         assert builder.validate_meta_prompt("") is False
         assert builder.validate_meta_prompt(None) is False
     
     def test_validate_optimized_prompt_valid(self):
         """Test optimized prompt validation with valid prompt."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         valid_prompt = """
         You are a senior software engineer implementing issue #123.
@@ -529,7 +552,8 @@ class TestPromptBuilder:
     
     def test_validate_optimized_prompt_invalid(self):
         """Test optimized prompt validation with invalid prompt."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         # Check if method exists, if not skip this test
         if hasattr(builder, 'validate_optimized_prompt'):
@@ -550,7 +574,8 @@ class TestPromptBuilder:
     
     def test_execute_llm_tool_timeout(self):
         """Test LLM tool execution with timeout."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("claude", 30)
@@ -568,7 +593,8 @@ class TestPromptBuilder:
     
     def test_execute_llm_tool_generic_exception(self):
         """Test LLM tool execution with generic exception."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = Exception("Unexpected error")
@@ -586,7 +612,8 @@ class TestPromptBuilder:
     
     def test_build_with_claude_cleanup_on_error(self):
         """Test Claude execution with error handling."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(
@@ -602,7 +629,8 @@ class TestPromptBuilder:
     
     def test_generate_bug_analysis_prompt_comprehensive(self):
         """Test comprehensive bug analysis prompt generation."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         bug_description = "Users can't login - authentication fails silently"
         claude_md = "# Authentication System\nUses JWT tokens for auth"
@@ -624,7 +652,8 @@ class TestPromptBuilder:
     
     def test_generate_feature_analysis_prompt_comprehensive(self):
         """Test comprehensive feature analysis prompt generation."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         feature_description = "Add CSV export functionality to reports"
         claude_md = "# Reporting System\nSupports PDF and HTML export"
@@ -646,7 +675,8 @@ class TestPromptBuilder:
     
     def test_execute_two_stage_prompt_meta_prompt_validation_fails(self):
         """Test two-stage execution when meta prompt validation fails."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch.object(builder, 'generate_meta_prompt', return_value="Short"), \
              patch.object(builder, 'validate_meta_prompt', return_value=False):
@@ -668,7 +698,8 @@ class TestPromptBuilder:
     
     def test_execute_two_stage_prompt_optimized_prompt_validation_fails(self):
         """Test two-stage execution when optimized prompt validation fails."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch.object(builder, 'generate_meta_prompt', return_value="Valid meta prompt content"), \
              patch.object(builder, 'validate_meta_prompt', return_value=True), \
@@ -702,7 +733,8 @@ class TestPromptBuilder:
     
     def test_execute_review_with_claude(self):
         """Test PR review execution with Claude."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch('subprocess.run') as mock_run, \
              patch('tempfile.NamedTemporaryFile') as mock_temp:
@@ -727,7 +759,8 @@ class TestPromptBuilder:
     
     def test_build_pr_review_prompt_method_exists(self):
         """Test that PR review prompt building method exists."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         # Check for the actual method that exists
         if hasattr(builder, 'build_pr_review_prompt'):
@@ -739,7 +772,8 @@ class TestPromptBuilder:
     
     def test_build_bug_analysis_prompt_method_exists(self):
         """Test that bug analysis prompt building method exists."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         # Check for the actual method that exists
         if hasattr(builder, 'build_bug_analysis_prompt'):
@@ -751,7 +785,8 @@ class TestPromptBuilder:
     
     def test_build_feature_analysis_prompt_method_exists(self):
         """Test that feature analysis prompt building method exists."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         # Check for the actual method that exists
         if hasattr(builder, 'build_feature_analysis_prompt'):
@@ -763,7 +798,8 @@ class TestPromptBuilder:
     
     def test_execute_llm_tool_method_delegation(self):
         """Test that execute_llm_tool method properly delegates to _execute_llm_tool."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch.object(builder, '_execute_llm_tool') as mock_execute:
             mock_execute.return_value = LLMResult(

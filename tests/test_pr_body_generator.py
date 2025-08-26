@@ -9,6 +9,7 @@ import pytest
 
 from src.claude_tasker.pr_body_generator import PRBodyGenerator
 from src.claude_tasker.github_client import IssueData
+from src.claude_tasker.services.command_executor import CommandExecutor
 
 
 class TestPRBodyGenerator(TestCase):
@@ -16,7 +17,8 @@ class TestPRBodyGenerator(TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.generator = PRBodyGenerator()
+        mock_executor = Mock(spec=CommandExecutor)
+        self.generator = PRBodyGenerator(mock_executor)
         self.sample_issue = IssueData(
             number=123,
             title="Add user authentication",
