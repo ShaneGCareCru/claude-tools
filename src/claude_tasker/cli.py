@@ -212,12 +212,12 @@ def validate_arguments(args: argparse.Namespace) -> Optional[str]:
             return "Error: --validate cannot be used with other actions"
         return None
     
-    # Must specify exactly one main action
+    # Must specify exactly one main action (unless using --validate)
     actions = [args.issue, args.review_pr, args.bug, args.feature]
     active_actions = [action for action in actions if action is not None]
     
     if len(active_actions) == 0:
-        return "Must specify an issue number, --review-pr, --bug, --feature, or --validate"
+        return "Must specify an issue number, --review-pr, --bug, or --feature"
     
     if len(active_actions) > 1:
         return "Error: Cannot specify multiple actions simultaneously"

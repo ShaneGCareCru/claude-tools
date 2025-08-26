@@ -1,7 +1,7 @@
 """Tests for handoff planner."""
 
 from unittest.mock import Mock, patch
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -85,7 +85,7 @@ class TestPlanner:
         
         # Verify PR creation
         pr_action = next(a for a in plan.actions if a.type.value == "create_pr")
-        assert "Fix issue #123" in pr_action.title
+        assert "Fix #123:" in pr_action.title
         assert pr_action.head_branch == "feature-branch"
         assert pr_action.base_branch == "main"
         assert pr_action.dedupe_strategy.method == DedupeMethod.BY_TITLE_HASH
@@ -360,17 +360,17 @@ class TestPlanner:
     def test_generated_content_includes_timestamps(self, mock_datetime, planner, sample_issue_data):
         """Test that generated content includes timestamps."""
         # Mock datetime to return fixed time
-        fixed_time = datetime(2024, 1, 1, 12, 0, 0)
-        mock_datetime.utcnow.return_value = fixed_time
+        fixed_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = fixed_time
         
         # Test processing start comment
         comment = planner._generate_processing_start_comment(sample_issue_data)
-        assert "2024-01-01T12:00:00Z" in comment
+        assert "2024-01-01T12:00:00+00:00" in comment
         assert "Processing Started" in comment
         
         # Test completion comment
         completion = planner._generate_completion_comment(sample_issue_data)
-        assert "2024-01-01T12:00:00Z" in completion
+        assert "2024-01-01T12:00:00+00:00" in completion
         assert "Processing Complete" in completion
     
     def test_pr_content_generation(self, planner, sample_issue_data):

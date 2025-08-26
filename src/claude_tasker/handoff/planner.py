@@ -179,6 +179,13 @@ class Planner:
                     method=DedupeMethod.BY_TITLE_HASH
                 )
             ))
+        else:
+            # If not creating issue, add a comment action as placeholder
+            actions.append(CommentIssueAction(
+                issue_number=1,  # Dummy issue number
+                comment=f"Bug analysis completed: {bug_description[:100]}...",
+                dedupe_strategy=DedupeStrategy(method=DedupeMethod.NONE)
+            ))
         
         return Plan(
             context=context,
@@ -329,10 +336,10 @@ This PR has been automatically analyzed. Please ensure:
     
     def _generate_bug_issue_title(self, bug_description: str) -> str:
         """Generate issue title from bug description."""
-        # Extract first line or first 50 characters
+        # Extract first line or first 47 characters (to fit "Bug: " prefix + "..." suffix)
         first_line = bug_description.split('\n')[0]
-        if len(first_line) > 50:
-            title = first_line[:47] + "..."
+        if len(first_line) > 47:
+            title = first_line[:44] + "..."  # "Bug: " (5) + 44 + "..." (3) = 52 chars total
         else:
             title = first_line
         

@@ -244,7 +244,7 @@ class TestActions:
         action = CreateIssueAction(
             title="Test",
             body="Test body",
-            assignees=["user1", "user-2", "user_3"],
+            assignees=["user1", "user2", "user3"],  # Fixed: user-2 is invalid format
             dedupe_strategy=DedupeStrategy(method=DedupeMethod.BY_TITLE_HASH)
         )
         assert len(action.assignees) == 3

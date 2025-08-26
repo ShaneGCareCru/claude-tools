@@ -286,7 +286,10 @@ class TestCreateDefaultHandoffDir:
     def test_create_default_handoff_dir_success(self):
         """Test successful creation of default handoff directory."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            with patch('pathlib.Path.cwd', return_value=Path(temp_dir)):
+            import os
+            old_cwd = os.getcwd()
+            try:
+                os.chdir(temp_dir)
                 create_default_handoff_dir()
                 
                 handoff_dir = Path(temp_dir) / ".claude-tasker" / "handoff"
@@ -301,6 +304,8 @@ class TestCreateDefaultHandoffDir:
                 assert "Claude Tasker Handoff Plans" in readme_content
                 assert "## Plan Files" in readme_content
                 assert "## Validation" in readme_content
+            finally:
+                os.chdir(old_cwd)
     
     def test_create_default_handoff_dir_already_exists(self):
         """Test creation when directory already exists."""

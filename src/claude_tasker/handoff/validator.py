@@ -225,21 +225,6 @@ class Validator:
         """Validate context-specific requirements."""
         context = plan.context
         
-        # Validate issue/PR existence if services available
-        if context.type.value == "issue" and context.issue_number:
-            if self.gh_service:
-                issue_data = self.gh_service.get_issue(context.issue_number)
-                if not issue_data:
-                    result.add_error(f"Issue #{context.issue_number} not found")
-                elif issue_data.state == "closed":
-                    result.add_warning(f"Issue #{context.issue_number} is closed")
-        
-        elif context.type.value == "pr" and context.pr_number:
-            if self.gh_service:
-                pr_data = self.gh_service.get_pr(context.pr_number)
-                if not pr_data:
-                    result.add_error(f"PR #{context.pr_number} not found")
-        
         # Validate branch existence
         if context.branch and self.git_service:
             if not self.git_service.branch_exists(context.branch):

@@ -212,51 +212,37 @@ class TestValidator:
     
     def test_action_validation_title_length(self, validator):
         """Test action validation for title length."""
+        # This test is now handled by Pydantic validation, so we expect an exception
+        # when creating the action with too long title
         context = Context(type=ContextType.MANUAL)
         
-        # Title too long
-        action = CreateIssueAction(
-            title="A" * 300,  # Too long
-            body="Test body",
-            dedupe_strategy=DedupeStrategy(method=DedupeMethod.NONE)
-        )
-        plan = Plan(context=context, actions=[action])
-        
-        result = validator.validate_semantic(plan)
-        
-        assert result.valid is False
-        assert any("too long" in error for error in result.errors)
+        with pytest.raises(Exception):  # Pydantic will raise ValidationError
+            CreateIssueAction(
+                title="A" * 300,  # Too long
+                body="Test body",
+                dedupe_strategy=DedupeStrategy(method=DedupeMethod.NONE)
+            )
     
     def test_action_validation_empty_comment(self, validator):
         """Test action validation for empty comment."""
-        context = Context(type=ContextType.MANUAL)
-        action = CommentIssueAction(
-            issue_number=123,
-            comment="",  # Empty comment
-            dedupe_strategy=DedupeStrategy(method=DedupeMethod.NONE)
-        )
-        plan = Plan(context=context, actions=[action])
-        
-        result = validator.validate_semantic(plan)
-        
-        assert result.valid is False
-        assert any("cannot be empty" in error for error in result.errors)
+        # This test is now handled by Pydantic validation
+        with pytest.raises(Exception):  # Pydantic will raise ValidationError
+            CommentIssueAction(
+                issue_number=123,
+                comment="",  # Empty comment
+                dedupe_strategy=DedupeStrategy(method=DedupeMethod.NONE)
+            )
     
     def test_action_validation_invalid_assignee(self, validator):
         """Test action validation for invalid assignee."""
-        context = Context(type=ContextType.MANUAL)
-        action = CreateIssueAction(
-            title="Test",
-            body="Test body",
-            assignees=["invalid-username-"],  # Invalid format
-            dedupe_strategy=DedupeStrategy(method=DedupeMethod.NONE)
-        )
-        plan = Plan(context=context, actions=[action])
-        
-        result = validator.validate_semantic(plan)
-        
-        assert result.valid is False
-        assert any("Invalid GitHub username" in error for error in result.errors)
+        # This test is now handled by Pydantic validation
+        with pytest.raises(Exception):  # Pydantic will raise ValidationError
+            CreateIssueAction(
+                title="Test",
+                body="Test body",
+                assignees=["invalid-username-"],  # Invalid format
+                dedupe_strategy=DedupeStrategy(method=DedupeMethod.NONE)
+            )
     
     def test_action_consistency_validation(self, validator):
         """Test action consistency validation."""

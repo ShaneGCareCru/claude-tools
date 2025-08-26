@@ -37,11 +37,11 @@ class DedupeStrategy(BaseModel):
     marker: Optional[str] = None
     signature_lines: int = Field(default=3, ge=1, le=10)
 
-    @field_validator('marker')
-    def marker_required_for_dedupe_marker(cls, v, info):
-        if hasattr(info, 'data') and info.data.get('method') == DedupeMethod.DEDUPE_MARKER and not v:
+    @model_validator(mode='after')
+    def marker_required_for_dedupe_marker(self):
+        if self.method == DedupeMethod.DEDUPE_MARKER and not self.marker:
             raise ValueError('marker is required when method is dedupe_marker')
-        return v
+        return self
 
 
 class Context(BaseModel):
@@ -93,7 +93,7 @@ class CreateIssueAction(Action):
             import re
             for assignee in v:
                 if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,38}[a-zA-Z0-9])?$', assignee):
-                    raise ValueError('Invalid GitHub username format')
+                    raise ValueError(f'Invalid GitHub username format: {assignee}')
         return v
 
 
