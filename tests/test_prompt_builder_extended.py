@@ -204,8 +204,9 @@ class TestPromptBuilderExtended:
         
         assert result is not None
         assert isinstance(result, str)
-        assert task_type in result
-        assert "Project context" in result
+        assert "Test Issue" in result
+        assert "Project context" in result or "PROJECT CONTEXT" in result
+        assert "Lyra-Dev" in result
     
     def test_execute_two_stage_prompt(self, prompt_builder):
         """Test execute_two_stage_prompt method."""
