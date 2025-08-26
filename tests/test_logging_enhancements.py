@@ -17,6 +17,7 @@ from src.claude_tasker.prompt_models import TwoStageResult, LLMResult
 from src.claude_tasker.workflow_logic import WorkflowLogic
 from src.claude_tasker.prompt_models import LLMResult
 from src.claude_tasker.github_client import IssueData, PRData
+from src.claude_tasker.services.command_executor import CommandExecutor
 
 
 class TestLoggingConfiguration:
@@ -93,7 +94,8 @@ class TestPromptBuilderLogging:
     @pytest.fixture
     def prompt_builder(self):
         """Create a PromptBuilder instance for testing."""
-        return PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        return PromptBuilder(mock_executor)
     
     @pytest.fixture
     def mock_issue_data(self):
@@ -230,7 +232,12 @@ class TestWorkflowLogicLogging:
         """Create a WorkflowLogic instance for testing."""
         with patch('src.claude_tasker.workflow_logic.GitHubClient'):
             with patch('src.claude_tasker.workflow_logic.WorkspaceManager'):
-                return WorkflowLogic()
+                with patch('src.claude_tasker.workflow_logic.EnvironmentValidator'):
+                    with patch('src.claude_tasker.workflow_logic.PromptBuilder'):
+                        with patch('src.claude_tasker.workflow_logic.PRBodyGenerator'):
+                            with patch('src.claude_tasker.workflow_logic.CommandExecutor'):
+                                with patch('src.claude_tasker.workflow_logic.GitService'):
+                                    return WorkflowLogic()
     
     def test_validate_environment_logging(self, workflow_logic, caplog):
         """Test environment validation logging."""
@@ -317,16 +324,25 @@ class TestResponseProcessingLogging:
     @pytest.fixture
     def prompt_builder(self):
         """Create a PromptBuilder instance for testing."""
-        return PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        return PromptBuilder(mock_executor)
     
-    @patch('subprocess.run')
-    def test_successful_response_logging(self, mock_run, prompt_builder, caplog):
+    def test_successful_response_logging(self, prompt_builder, caplog):
         """Test logging of successful responses."""
-        mock_run.return_value = Mock(
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
+        # Mock the executor's execute method to return proper CommandResult
+        mock_result = CommandResult(
             returncode=0,
             stdout='{"success": true, "result": "response content"}',
-            stderr=''
+            stderr='',
+            command=['claude'],
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
         )
+        prompt_builder.executor.execute.return_value = mock_result
         
         with caplog.at_level(logging.DEBUG):
             result = prompt_builder._execute_llm_tool(
@@ -338,14 +354,22 @@ class TestResponseProcessingLogging:
             assert "FULL CLAUDE RESPONSE:" in caplog.text
             assert '{"success": true, "result": "response content"}' in caplog.text
     
-    @patch('subprocess.run')
-    def test_error_response_logging(self, mock_run, prompt_builder, caplog):
+    def test_error_response_logging(self, prompt_builder, caplog):
         """Test logging of error responses."""
-        mock_run.return_value = Mock(
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
+        # Mock the executor's execute method to return failed CommandResult
+        mock_result = CommandResult(
             returncode=1,
             stdout='error output',
-            stderr='error details'
+            stderr='error details',
+            command=['claude'],
+            execution_time=1.0,
+            error_type=CommandErrorType.GENERAL_ERROR,
+            attempts=1,
+            success=False
         )
+        prompt_builder.executor.execute.return_value = mock_result
         
         with caplog.at_level(logging.DEBUG):
             result = prompt_builder._execute_llm_tool(
@@ -386,7 +410,8 @@ class TestIntegrationLogging:
             truncate_length=1000
         )
         
-        prompt_builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        prompt_builder = PromptBuilder(mock_executor)
         
         with patch.object(prompt_builder, 'build_with_llm') as mock_llm:
             mock_llm.return_value = {'result': 'optimized prompt'}
@@ -430,7 +455,8 @@ class TestPerformanceLogging:
         """Test that logging overhead is minimal at INFO level."""
         import time
         setup_logging(log_level='INFO')
-        prompt_builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        prompt_builder = PromptBuilder(mock_executor)
         
         start = time.time()
         for _ in range(100):
@@ -452,7 +478,8 @@ class TestPerformanceLogging:
             log_prompts=True,
             log_responses=True
         )
-        prompt_builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        prompt_builder = PromptBuilder(mock_executor)
         
         prompt = "x" * 5000 + " DECONSTRUCT DIAGNOSE DEVELOP DELIVER"
         

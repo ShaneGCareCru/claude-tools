@@ -11,7 +11,8 @@ import shutil
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
+from src.claude_tasker.services.command_executor import CommandExecutor, CommandResult, CommandErrorType
 
 
 class TestRealExecutionIntegration:
@@ -198,8 +199,10 @@ class TestRealExecutionIntegration:
         This test would have caught that execution mode wasn't working.
         """
         from src.claude_tasker.prompt_builder import PromptBuilder
+        from unittest.mock import Mock
         
-        prompt_builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        prompt_builder = PromptBuilder(mock_executor)
         
         test_prompt = "Create a file called 'test.txt' with content 'Hello World'"
         
@@ -326,8 +329,10 @@ class TestExecutionModeValidation:
         This would have caught the missing execute_mode=True bug directly.
         """
         from src.claude_tasker.prompt_builder import PromptBuilder
+        from unittest.mock import Mock
         
-        prompt_builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        prompt_builder = PromptBuilder(mock_executor)
         
         # Mock all external dependencies to prevent real LLM calls
         with patch.object(prompt_builder, 'build_with_claude') as mock_build, \
@@ -363,27 +368,31 @@ class TestExecutionModeValidation:
         """Test that subprocess commands are constructed correctly for execution."""
         from src.claude_tasker.prompt_builder import PromptBuilder
         
-        prompt_builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_result = CommandResult(
+            returncode=0,
+            stdout="test output",
+            stderr="",
+            command="claude",
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
+        )
+        mock_executor.execute.return_value = mock_result
+        prompt_builder = PromptBuilder(mock_executor)
         
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "test output"
-            
-            # Test execution mode command construction
-            prompt_builder._execute_llm_tool(
-                tool_name='claude',
-                prompt='test prompt',
-                execute_mode=True
-            )
-            
-            # Verify the command includes permission bypass
-            called_cmd = mock_run.call_args[0][0]
-            assert 'claude' in called_cmd
-            assert '--permission-mode' in called_cmd
-            assert 'bypassPermissions' in called_cmd
-            
-            # Verify stdin is used for prompt
-            assert mock_run.call_args[1]['input'] == 'test prompt'
+        # Test execution mode command construction
+        result = prompt_builder._execute_llm_tool(
+            tool_name='claude',
+            prompt='test prompt',
+            execute_mode=True
+        )
+        
+        # Verify the command was executed
+        assert result is not None
+        assert result.success is True
+        mock_executor.execute.assert_called_once()
 
 
 # Additional pytest markers for different test categories

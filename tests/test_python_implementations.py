@@ -15,14 +15,18 @@ class TestPRBodyGeneratorImplementation:
     
     def test_init(self):
         """Test PRBodyGenerator initialization."""
-        generator = PRBodyGenerator()
+        from src.claude_tasker.services.command_executor import CommandExecutor
+        mock_executor = Mock(spec=CommandExecutor)
+        generator = PRBodyGenerator(mock_executor)
         assert hasattr(generator, 'max_size')
         assert hasattr(generator, 'template_paths')
         assert generator.max_size == 10000
     
     def test_detect_pr_template_not_exists(self, tmp_path):
         """Test template detection when .github directory doesn't exist."""
-        generator = PRBodyGenerator()
+        from src.claude_tasker.services.command_executor import CommandExecutor
+        mock_executor = Mock(spec=CommandExecutor)
+        generator = PRBodyGenerator(mock_executor)
         assert generator.detect_templates(str(tmp_path)) is None
     
     def test_detect_pr_template_exists(self, tmp_path):
@@ -34,7 +38,9 @@ class TestPRBodyGeneratorImplementation:
         template_content = "# PR Template\n## Summary\n## Changes"
         template_file.write_text(template_content)
         
-        generator = PRBodyGenerator()
+        from src.claude_tasker.services.command_executor import CommandExecutor
+        mock_executor = Mock(spec=CommandExecutor)
+        generator = PRBodyGenerator(mock_executor)
         result = generator.detect_templates(str(tmp_path))
         assert result == template_content
     
@@ -53,7 +59,9 @@ class TestPRBodyGeneratorImplementation:
         for name, content in templates:
             (github_dir / name).write_text(content)
         
-        generator = PRBodyGenerator()
+        from src.claude_tasker.services.command_executor import CommandExecutor
+        mock_executor = Mock(spec=CommandExecutor)
+        generator = PRBodyGenerator(mock_executor)
         # Should prioritize pull_request_template.md over others
         result = generator.detect_templates(str(tmp_path))
         assert result == "lowercase template"
@@ -62,7 +70,9 @@ class TestPRBodyGeneratorImplementation:
         """Test successful context aggregation."""
         from src.claude_tasker.github_client import IssueData
         
-        generator = PRBodyGenerator()
+        from src.claude_tasker.services.command_executor import CommandExecutor
+        mock_executor = Mock(spec=CommandExecutor)
+        generator = PRBodyGenerator(mock_executor)
         
         # Create mock issue data
         issue_data = IssueData(
@@ -91,7 +101,9 @@ class TestPRBodyGeneratorImplementation:
         """Test context aggregation with minimal data."""
         from src.claude_tasker.github_client import IssueData
         
-        generator = PRBodyGenerator()
+        from src.claude_tasker.services.command_executor import CommandExecutor
+        mock_executor = Mock(spec=CommandExecutor)
+        generator = PRBodyGenerator(mock_executor)
         
         # Create minimal issue data
         issue_data = IssueData(
@@ -119,7 +131,9 @@ class TestPRBodyGeneratorImplementation:
         """Test fallback body generation."""
         from src.claude_tasker.github_client import IssueData
         
-        generator = PRBodyGenerator()
+        from src.claude_tasker.services.command_executor import CommandExecutor
+        mock_executor = Mock(spec=CommandExecutor)
+        generator = PRBodyGenerator(mock_executor)
         
         issue_data = IssueData(
             number=123,
@@ -140,20 +154,24 @@ class TestPRBodyGeneratorImplementation:
         assert "## Changes" in result
         assert "## Testing" in result
     
-    @patch('subprocess.run')
-    def test_generate_with_llm_tool_available(self, mock_run):
+    def test_generate_with_llm_tool_available(self):
         """Test PR generation with LLM tool available."""
-        generator = PRBodyGenerator()
+        from src.claude_tasker.services.command_executor import CommandExecutor, CommandResult, CommandErrorType
+        mock_executor = Mock(spec=CommandExecutor)
+        generator = PRBodyGenerator(mock_executor)
         
-        def side_effect(*args, **kwargs):
-            cmd = args[0] if isinstance(args[0], list) else [args[0]]
-            cmd_str = ' '.join(cmd)
-            if 'llm' in cmd and 'prompt' in cmd:
-                return Mock(returncode=0, stdout="Generated PR body")
-            else:
-                return Mock(returncode=0, stdout="")
-        
-        mock_run.side_effect = side_effect
+        # Mock successful LLM execution
+        mock_result = CommandResult(
+            returncode=0,
+            stdout="Generated PR body",
+            stderr="",
+            command=["llm"],
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
+        )
+        mock_executor.execute.return_value = mock_result
         
         from src.claude_tasker.github_client import IssueData
         issue_data = IssueData(
@@ -167,22 +185,51 @@ class TestPRBodyGeneratorImplementation:
         
         assert result == "Generated PR body"
     
-    @patch('subprocess.run')
-    def test_generate_with_claude_fallback(self, mock_run):
+    def test_generate_with_claude_fallback(self):
         """Test PR generation falling back to Claude."""
-        generator = PRBodyGenerator()
+        from src.claude_tasker.services.command_executor import CommandExecutor, CommandResult, CommandErrorType
+        mock_executor = Mock(spec=CommandExecutor)
+        generator = PRBodyGenerator(mock_executor)
         
-        def side_effect(*args, **kwargs):
-            cmd = args[0] if isinstance(args[0], list) else [args[0]]
-            cmd_str = ' '.join(cmd)
-            if 'llm' in cmd and 'prompt' in cmd:
-                raise FileNotFoundError("llm not found")  # Simulate LLM not available
-            elif 'claude' in cmd and '--file' in cmd:
-                return Mock(returncode=0, stdout="Claude generated body")
+        def side_effect(cmd, **kwargs):
+            """Mock CommandExecutor behavior: LLM fails, Claude succeeds."""
+            if any('llm' in str(c) for c in cmd):
+                # LLM command fails
+                return CommandResult(
+                    returncode=1,
+                    stdout="",
+                    stderr="llm command failed",
+                    command=cmd,
+                    execution_time=1.0,
+                    error_type=CommandErrorType.GENERAL_ERROR,
+                    attempts=1,
+                    success=False
+                )
+            elif any('claude' in str(c) for c in cmd):
+                # Claude command succeeds
+                return CommandResult(
+                    returncode=0,
+                    stdout="Claude generated body",
+                    stderr="",
+                    command=cmd,
+                    execution_time=1.0,
+                    error_type=CommandErrorType.SUCCESS,
+                    attempts=1,
+                    success=True
+                )
             else:
-                return Mock(returncode=0, stdout="")
+                return CommandResult(
+                    returncode=0,
+                    stdout="",
+                    stderr="",
+                    command=cmd,
+                    execution_time=1.0,
+                    error_type=CommandErrorType.SUCCESS,
+                    attempts=1,
+                    success=True
+                )
         
-        mock_run.side_effect = side_effect
+        mock_executor.execute.side_effect = side_effect
         
         from src.claude_tasker.github_client import IssueData
         issue_data = IssueData(

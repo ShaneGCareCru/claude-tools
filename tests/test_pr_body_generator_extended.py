@@ -6,6 +6,7 @@ from datetime import datetime
 
 from src.claude_tasker.pr_body_generator import PRBodyGenerator
 from src.claude_tasker.github_client import IssueData
+from src.claude_tasker.services.command_executor import CommandExecutor
 
 
 class TestPRBodyGeneratorExtended:
@@ -14,7 +15,8 @@ class TestPRBodyGeneratorExtended:
     @pytest.fixture
     def generator(self):
         """Create a PRBodyGenerator instance."""
-        return PRBodyGenerator()
+        mock_executor = Mock(spec=CommandExecutor)
+        return PRBodyGenerator(mock_executor)
     
     @pytest.fixture
     def issue_data(self):

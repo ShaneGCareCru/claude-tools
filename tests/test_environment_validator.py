@@ -8,6 +8,8 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 
 from src.claude_tasker.environment_validator import EnvironmentValidator
+from src.claude_tasker.services.command_executor import CommandExecutor
+from src.claude_tasker.services.git_service import GitService
 
 
 class TestEnvironmentValidator(TestCase):
@@ -15,7 +17,10 @@ class TestEnvironmentValidator(TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor  # Add executor attribute
+        self.validator = EnvironmentValidator(mock_git_service)
     
     def test_init(self):
         """Test validator initialization."""
@@ -25,131 +30,134 @@ class TestEnvironmentValidator(TestCase):
         self.assertIn('claude', self.validator.optional_tools)
         self.assertIn('llm', self.validator.optional_tools)
     
-    @patch('subprocess.run')
-    def test_validate_git_repository_valid(self, mock_run):
+    def test_validate_git_repository_valid(self):
         """Test git repository validation with valid repo."""
-        mock_run.return_value = Mock(returncode=0, stdout='.git')
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
+        # Mock GitService rev_parse method to return success
+        result = CommandResult(
+            returncode=0,
+            stdout='.git',
+            stderr='',
+            command=['git', 'rev-parse', '--git-dir'],
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
+        )
+        self.validator.git_service.rev_parse.return_value = result
         
         valid, message = self.validator.validate_git_repository()
         
         self.assertTrue(valid)
         self.assertEqual(message, "Valid git repository")
-        mock_run.assert_called_once_with(
-            ['git', 'rev-parse', '--git-dir'],
-            cwd='.',
-            capture_output=True,
-            text=True,
-            check=False
-        )
+        self.validator.git_service.rev_parse.assert_called_once_with('--git-dir', cwd='.')
     
-    @patch('subprocess.run')
-    def test_validate_git_repository_invalid(self, mock_run):
+    def test_validate_git_repository_invalid(self):
         """Test git repository validation with invalid repo."""
-        mock_run.return_value = Mock(returncode=1, stdout='')
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
+        # Mock GitService rev_parse method to return failure
+        result = CommandResult(
+            returncode=1,
+            stdout='',
+            stderr='not a git repository',
+            command=['git', 'rev-parse', '--git-dir'],
+            execution_time=1.0,
+            error_type=CommandErrorType.GENERAL_ERROR,
+            attempts=1,
+            success=False
+        )
+        self.validator.git_service.rev_parse.return_value = result
         
         valid, message = self.validator.validate_git_repository()
         
         self.assertFalse(valid)
         self.assertEqual(message, "Not a git repository")
     
-    @patch('subprocess.run')
-    def test_validate_git_repository_custom_path(self, mock_run):
+    def test_validate_git_repository_custom_path(self):
         """Test git repository validation with custom path."""
-        mock_run.return_value = Mock(returncode=0, stdout='.git')
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
+        # Mock GitService rev_parse method to return success
+        result = CommandResult(
+            returncode=0,
+            stdout='.git',
+            stderr='',
+            command=['git', 'rev-parse', '--git-dir'],
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
+        )
+        self.validator.git_service.rev_parse.return_value = result
         
         valid, message = self.validator.validate_git_repository("/custom/path")
         
         self.assertTrue(valid)
-        mock_run.assert_called_once_with(
-            ['git', 'rev-parse', '--git-dir'],
-            cwd='/custom/path',
-            capture_output=True,
-            text=True,
-            check=False
-        )
+        self.validator.git_service.rev_parse.assert_called_once_with('--git-dir', cwd='/custom/path')
     
-    @patch('subprocess.run')
-    def test_validate_git_repository_git_not_found(self, mock_run):
+    def test_validate_git_repository_git_not_found(self):
         """Test git repository validation when git not found."""
-        mock_run.side_effect = FileNotFoundError()
+        # Mock GitService rev_parse method to raise FileNotFoundError
+        self.validator.git_service.rev_parse.side_effect = FileNotFoundError("Git not found")
         
         valid, message = self.validator.validate_git_repository()
         
         self.assertFalse(valid)
-        self.assertEqual(message, "Git not found")
+        self.assertEqual(message, "Git validation error: Git not found")
     
-    @patch('subprocess.run')
-    def test_validate_github_remote_valid(self, mock_run):
+    def test_validate_github_remote_valid(self):
         """Test GitHub remote validation with valid remote."""
-        mock_run.return_value = Mock(
-            returncode=0,
-            stdout='https://github.com/owner/repo.git'
-        )
+        # Mock GitService get_remote_url method to return GitHub URL
+        self.validator.git_service.get_remote_url.return_value = 'https://github.com/owner/repo.git'
         
         valid, message = self.validator.validate_github_remote()
         
         self.assertTrue(valid)
         self.assertIn('GitHub remote:', message)
         self.assertIn('https://github.com/owner/repo.git', message)
-        mock_run.assert_called_once_with(
-            ['git', 'config', '--get', 'remote.origin.url'],
-            cwd='.',
-            capture_output=True,
-            text=True,
-            check=False
-        )
+        self.validator.git_service.get_remote_url.assert_called_once_with('origin', cwd='.')
     
-    @patch('subprocess.run')
-    def test_validate_github_remote_no_github(self, mock_run):
+    def test_validate_github_remote_no_github(self):
         """Test GitHub remote validation with non-GitHub remote."""
-        mock_run.return_value = Mock(
-            returncode=0,
-            stdout='https://gitlab.com/owner/repo.git'
-        )
+        # Mock GitService get_remote_url method to return non-GitHub URL
+        self.validator.git_service.get_remote_url.return_value = 'https://gitlab.com/owner/repo.git'
         
         valid, message = self.validator.validate_github_remote()
         
         self.assertFalse(valid)
         self.assertEqual(message, "No GitHub remote found")
     
-    @patch('subprocess.run')
-    def test_validate_github_remote_no_remote(self, mock_run):
+    def test_validate_github_remote_no_remote(self):
         """Test GitHub remote validation with no remote."""
-        mock_run.return_value = Mock(returncode=1, stdout='')
+        # Mock GitService get_remote_url method to return None
+        self.validator.git_service.get_remote_url.return_value = None
         
         valid, message = self.validator.validate_github_remote()
         
         self.assertFalse(valid)
         self.assertEqual(message, "No GitHub remote found")
     
-    @patch('subprocess.run')
-    def test_validate_github_remote_custom_path(self, mock_run):
+    def test_validate_github_remote_custom_path(self):
         """Test GitHub remote validation with custom path."""
-        mock_run.return_value = Mock(
-            returncode=0,
-            stdout='https://github.com/owner/repo.git'
-        )
+        # Mock GitService get_remote_url method to return GitHub URL
+        self.validator.git_service.get_remote_url.return_value = 'https://github.com/owner/repo.git'
         
         valid, message = self.validator.validate_github_remote("/custom/path")
         
         self.assertTrue(valid)
-        mock_run.assert_called_once_with(
-            ['git', 'config', '--get', 'remote.origin.url'],
-            cwd='/custom/path',
-            capture_output=True,
-            text=True,
-            check=False
-        )
+        self.validator.git_service.get_remote_url.assert_called_once_with('origin', cwd='/custom/path')
     
-    @patch('subprocess.run')
-    def test_validate_github_remote_git_not_found(self, mock_run):
+    def test_validate_github_remote_git_not_found(self):
         """Test GitHub remote validation when git not found."""
-        mock_run.side_effect = FileNotFoundError()
+        # Mock GitService get_remote_url method to raise FileNotFoundError
+        self.validator.git_service.get_remote_url.side_effect = FileNotFoundError("Git not found")
         
         valid, message = self.validator.validate_github_remote()
         
         self.assertFalse(valid)
-        self.assertEqual(message, "Git not found")
+        self.assertEqual(message, "Remote validation error: Git not found")
     
     @patch('os.path.exists')
     def test_check_claude_md_exists(self, mock_exists):
@@ -182,40 +190,31 @@ class TestEnvironmentValidator(TestCase):
         self.assertTrue(valid)
         mock_exists.assert_called_once_with('/custom/path/CLAUDE.md')
     
-    @patch('subprocess.run')
-    def test_check_tool_availability_available(self, mock_run):
+    @patch('shutil.which')
+    def test_check_tool_availability_available(self, mock_which):
         """Test tool availability check when tool is available."""
-        mock_run.return_value = Mock(
-            returncode=0,
-            stdout='/usr/bin/git'
-        )
+        mock_which.return_value = '/usr/bin/git'
         
         available, status = self.validator.check_tool_availability('git')
         
         self.assertTrue(available)
         self.assertEqual(status, 'git found at /usr/bin/git')
-        mock_run.assert_called_once_with(
-            ['command', '-v', 'git'],
-            capture_output=True,
-            text=True,
-            check=False,
-            shell=True
-        )
+        mock_which.assert_called_once_with('git')
     
-    @patch('subprocess.run')
-    def test_check_tool_availability_not_available(self, mock_run):
+    @patch('shutil.which')
+    def test_check_tool_availability_not_available(self, mock_which):
         """Test tool availability check when tool is not available."""
-        mock_run.return_value = Mock(returncode=1, stdout='')
+        mock_which.return_value = None
         
         available, status = self.validator.check_tool_availability('nonexistent')
         
         self.assertFalse(available)
         self.assertEqual(status, 'nonexistent not found')
     
-    @patch('subprocess.run')
-    def test_check_tool_availability_exception(self, mock_run):
+    @patch('shutil.which')
+    def test_check_tool_availability_exception(self, mock_which):
         """Test tool availability check with exception."""
-        mock_run.side_effect = Exception("Process error")
+        mock_which.side_effect = Exception("Process error")
         
         available, status = self.validator.check_tool_availability('git')
         

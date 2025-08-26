@@ -3,10 +3,13 @@ import pytest
 import subprocess
 import tempfile
 import os
+import shutil
 from pathlib import Path
 from unittest.mock import patch, Mock
 from src.claude_tasker.environment_validator import EnvironmentValidator
 from src.claude_tasker.workflow_logic import WorkflowLogic
+from src.claude_tasker.services.git_service import GitService
+from src.claude_tasker.services.command_executor import CommandExecutor
 
 
 class TestEnvironmentValidator:
@@ -14,7 +17,10 @@ class TestEnvironmentValidator:
     
     def test_init(self):
         """Test EnvironmentValidator initialization."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         assert 'git' in validator.required_tools
         assert 'gh' in validator.required_tools
         assert 'jq' in validator.required_tools
@@ -23,84 +29,125 @@ class TestEnvironmentValidator:
     
     def test_validate_git_repository_valid(self):
         """Test git repository validation when valid."""
-        validator = EnvironmentValidator()
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = ".git"
-            
-            valid, message = validator.validate_git_repository()
-            
-            assert valid is True
-            assert "Valid git repository" in message
-            mock_run.assert_called_once_with(
-                ['git', 'rev-parse', '--git-dir'],
-                cwd=".",
-                capture_output=True,
-                text=True,
-                check=False
-            )
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        
+        # Mock the rev_parse method to return a successful result
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        mock_result = CommandResult(
+            returncode=0,
+            stdout=".git",
+            stderr="",
+            command="git rev-parse --git-dir",
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
+        )
+        mock_git_service.rev_parse.return_value = mock_result
+        
+        validator = EnvironmentValidator(mock_git_service)
+        valid, message = validator.validate_git_repository()
+        
+        assert valid is True
+        assert "Valid git repository" in message
+        mock_git_service.rev_parse.assert_called_once_with('--git-dir', cwd='.')
     
     def test_validate_git_repository_invalid(self):
         """Test git repository validation when invalid."""
-        validator = EnvironmentValidator()
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value.returncode = 1
-            mock_run.return_value.stdout = ""
-            
-            valid, message = validator.validate_git_repository()
-            
-            assert valid is False
-            assert "Not a git repository" in message
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        
+        # Mock the rev_parse method to return a failed result
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        mock_result = CommandResult(
+            returncode=1,
+            stdout="",
+            stderr="not a git repository",
+            command="git rev-parse --git-dir",
+            execution_time=1.0,
+            error_type=CommandErrorType.GENERAL_ERROR,
+            attempts=1,
+            success=False
+        )
+        mock_git_service.rev_parse.return_value = mock_result
+        
+        validator = EnvironmentValidator(mock_git_service)
+        valid, message = validator.validate_git_repository()
+        
+        assert valid is False
+        assert "Not a git repository" in message
     
     def test_validate_git_repository_git_not_found(self):
         """Test git repository validation when git command not found."""
-        validator = EnvironmentValidator()
-        with patch('subprocess.run', side_effect=FileNotFoundError()):
-            valid, message = validator.validate_git_repository()
-            
-            assert valid is False
-            assert "Git not found" in message
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        
+        # Mock the rev_parse method to raise an exception
+        mock_git_service.rev_parse.side_effect = FileNotFoundError("git not found")
+        
+        validator = EnvironmentValidator(mock_git_service)
+        valid, message = validator.validate_git_repository()
+        
+        assert valid is False
+        assert "Git validation error: git not found" in message
     
     def test_validate_github_remote_valid(self):
         """Test GitHub remote validation when valid."""
-        validator = EnvironmentValidator()
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "https://github.com/user/repo.git\n"
-            
-            valid, message = validator.validate_github_remote()
-            
-            assert valid is True
-            assert "GitHub remote:" in message
-            assert "github.com/user/repo.git" in message
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        
+        # Mock the get_remote_url method to return a GitHub URL
+        mock_git_service.get_remote_url.return_value = "https://github.com/user/repo.git"
+        
+        validator = EnvironmentValidator(mock_git_service)
+        valid, message = validator.validate_github_remote()
+        
+        assert valid is True
+        assert "GitHub remote:" in message
+        assert "github.com/user/repo.git" in message
+        mock_git_service.get_remote_url.assert_called_once_with('origin', cwd='.')
     
     def test_validate_github_remote_no_github(self):
         """Test GitHub remote validation when no GitHub remote."""
-        validator = EnvironmentValidator()
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "https://gitlab.com/user/repo.git\n"
-            
-            valid, message = validator.validate_github_remote()
-            
-            assert valid is False
-            assert "No GitHub remote found" in message
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        
+        # Mock the get_remote_url method to return a non-GitHub URL
+        mock_git_service.get_remote_url.return_value = "https://gitlab.com/user/repo.git"
+        
+        validator = EnvironmentValidator(mock_git_service)
+        valid, message = validator.validate_github_remote()
+        
+        assert valid is False
+        assert "No GitHub remote found" in message
     
     def test_validate_github_remote_no_remote(self):
         """Test GitHub remote validation when no remote at all."""
-        validator = EnvironmentValidator()
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value.returncode = 1
-            mock_run.return_value.stdout = ""
-            
-            valid, message = validator.validate_github_remote()
-            
-            assert valid is False
-            assert "No GitHub remote found" in message
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        
+        # Mock the get_remote_url method to return None (no remote)
+        mock_git_service.get_remote_url.return_value = None
+        
+        validator = EnvironmentValidator(mock_git_service)
+        valid, message = validator.validate_github_remote()
+        
+        assert valid is False
+        assert "No GitHub remote found" in message
     
     def test_check_claude_md_exists(self, tmp_path):
         """Test CLAUDE.md check when file exists."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Test CLAUDE.md")
         
@@ -112,7 +159,10 @@ class TestEnvironmentValidator:
     
     def test_check_claude_md_missing(self, tmp_path):
         """Test CLAUDE.md check when file is missing."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         
         valid, message = validator.check_claude_md(str(tmp_path))
         
@@ -122,26 +172,24 @@ class TestEnvironmentValidator:
     
     def test_check_tool_availability_found(self):
         """Test tool availability check when tool is found."""
-        validator = EnvironmentValidator()
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "/usr/bin/git\n"
-            
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
+        
+        # Mock shutil.which to return a path
+        with patch('shutil.which', return_value='/usr/bin/git'):
             available, status = validator.check_tool_availability('git')
             
             assert available is True
             assert "git found at /usr/bin/git" in status
-            mock_run.assert_called_once_with(
-                ['command', '-v', 'git'],
-                capture_output=True,
-                text=True,
-                check=False,
-                shell=True
-            )
     
     def test_check_tool_availability_not_found(self):
         """Test tool availability check when tool is not found."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         with patch('subprocess.run') as mock_run:
             mock_run.return_value.returncode = 1
             mock_run.return_value.stdout = ""
@@ -153,8 +201,13 @@ class TestEnvironmentValidator:
     
     def test_check_tool_availability_exception(self):
         """Test tool availability check when exception occurs."""
-        validator = EnvironmentValidator()
-        with patch('subprocess.run', side_effect=Exception("Test error")):
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
+        
+        # Mock shutil.which to raise an exception
+        with patch('shutil.which', side_effect=Exception("Test error")):
             available, status = validator.check_tool_availability('git')
             
             assert available is False
@@ -162,7 +215,10 @@ class TestEnvironmentValidator:
     
     def test_validate_all_dependencies_success(self, tmp_path):
         """Test comprehensive validation when all dependencies are met."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Test")
         
@@ -187,7 +243,10 @@ class TestEnvironmentValidator:
     
     def test_validate_all_dependencies_missing_git_repo(self, tmp_path):
         """Test validation when not in git repository."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         
         with patch.object(validator, 'validate_git_repository', return_value=(False, "Not a git repository")), \
              patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
@@ -200,7 +259,10 @@ class TestEnvironmentValidator:
     
     def test_validate_all_dependencies_missing_claude_md(self, tmp_path):
         """Test validation when CLAUDE.md is missing."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         
         with patch.object(validator, 'validate_git_repository', return_value=(True, "Valid git repository")), \
              patch.object(validator, 'validate_github_remote', return_value=(True, "GitHub remote found")), \
@@ -213,7 +275,10 @@ class TestEnvironmentValidator:
     
     def test_validate_all_dependencies_missing_required_tools(self, tmp_path):
         """Test validation when required tools are missing."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Test")
         
@@ -235,7 +300,10 @@ class TestEnvironmentValidator:
     
     def test_validate_all_dependencies_missing_optional_tools_not_prompt_only(self, tmp_path):
         """Test validation when optional tools missing and not prompt-only mode."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Test")
         
@@ -259,7 +327,10 @@ class TestEnvironmentValidator:
     
     def test_validate_all_dependencies_missing_optional_tools_prompt_only(self, tmp_path):
         """Test validation when optional tools missing in prompt-only mode."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Test")
         
@@ -283,7 +354,10 @@ class TestEnvironmentValidator:
     
     def test_get_missing_dependencies(self):
         """Test getting list of missing required dependencies."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         
         validation_results = {
             'tool_status': {
@@ -300,7 +374,10 @@ class TestEnvironmentValidator:
     
     def test_format_validation_report_success(self):
         """Test formatting validation report for successful validation."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         
         validation_results = {
             'valid': True,
@@ -320,7 +397,10 @@ class TestEnvironmentValidator:
     
     def test_format_validation_report_failure(self):
         """Test formatting validation report for failed validation."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         
         validation_results = {
             'valid': False,
@@ -404,7 +484,10 @@ class TestEnvironmentValidationIntegration:
     
     def test_missing_git_tool_integration(self, tmp_path):
         """Test behavior when git tool is missing."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         
         def tool_side_effect(tool):
             if tool == 'git':
@@ -423,7 +506,10 @@ class TestEnvironmentValidationIntegration:
     
     def test_missing_github_cli_integration(self, tmp_path):
         """Test behavior when GitHub CLI is missing."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Test")
         
@@ -444,7 +530,10 @@ class TestEnvironmentValidationIntegration:
     
     def test_missing_jq_tool_integration(self, tmp_path):
         """Test behavior when jq tool is missing.""" 
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Test")
         
@@ -465,7 +554,10 @@ class TestEnvironmentValidationIntegration:
     
     def test_no_github_remote_integration(self, tmp_path):
         """Test behavior when no GitHub remote is configured."""
-        validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor
+        validator = EnvironmentValidator(mock_git_service)
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Test")
         

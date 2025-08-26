@@ -9,6 +9,7 @@ from pathlib import Path
 from src.claude_tasker.prompt_builder import PromptBuilder
 from src.claude_tasker.github_client import IssueData, PRData
 from src.claude_tasker.prompt_models import ExecutionOptions, PromptContext, LLMResult, TwoStageResult
+from src.claude_tasker.services.command_executor import CommandExecutor
 
 
 class TestPromptBuilderExtended:
@@ -17,7 +18,8 @@ class TestPromptBuilderExtended:
     @pytest.fixture
     def prompt_builder(self):
         """Create a PromptBuilder instance."""
-        return PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        return PromptBuilder(mock_executor)
     
     def test_generate_bug_analysis_prompt(self, prompt_builder):
         """Test generate_bug_analysis_prompt."""
@@ -84,12 +86,24 @@ class TestPromptBuilderExtended:
     
     def test_build_with_llm(self, prompt_builder):
         """Test build_with_llm method."""
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
         prompt = "Test prompt"
         
-        mock_result = Mock(returncode=0, stdout="LLM Success", stderr="")
+        # Mock CommandResult with proper structure
+        mock_result = CommandResult(
+            returncode=0,
+            stdout="LLM Success",
+            stderr="",
+            command=["llm"],
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
+        )
         
-        with patch('subprocess.run', return_value=mock_result):
-            result = prompt_builder.build_with_llm(prompt)
+        prompt_builder.executor.execute.return_value = mock_result
+        result = prompt_builder.build_with_llm(prompt)
         
         assert result is not None
         assert result.success is True
@@ -97,12 +111,24 @@ class TestPromptBuilderExtended:
     
     def test_build_with_llm_failure(self, prompt_builder):
         """Test build_with_llm with command failure."""
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
         prompt = "Test prompt"
         
-        mock_result = Mock(returncode=1, stdout="", stderr="Error")
+        # Mock CommandResult with failure
+        mock_result = CommandResult(
+            returncode=1,
+            stdout="",
+            stderr="Error",
+            command=["llm"],
+            execution_time=1.0,
+            error_type=CommandErrorType.GENERAL_ERROR,
+            attempts=1,
+            success=False
+        )
         
-        with patch('subprocess.run', return_value=mock_result):
-            result = prompt_builder.build_with_llm(prompt)
+        prompt_builder.executor.execute.return_value = mock_result
+        result = prompt_builder.build_with_llm(prompt)
         
         assert result is not None
         assert result.success is False
@@ -110,12 +136,24 @@ class TestPromptBuilderExtended:
     
     def test_build_with_claude(self, prompt_builder):
         """Test build_with_claude method."""
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
         prompt = "Test prompt"
         
-        mock_result = Mock(returncode=0, stdout="Claude Success", stderr="")
+        # Mock CommandResult with proper structure
+        mock_result = CommandResult(
+            returncode=0,
+            stdout="Claude Success",
+            stderr="",
+            command=["claude"],
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
+        )
         
-        with patch('subprocess.run', return_value=mock_result):
-            result = prompt_builder.build_with_claude(prompt)
+        prompt_builder.executor.execute.return_value = mock_result
+        result = prompt_builder.build_with_claude(prompt)
         
         assert result is not None
         assert result.success is True
@@ -123,12 +161,24 @@ class TestPromptBuilderExtended:
     
     def test_build_with_claude_execute_mode(self, prompt_builder):
         """Test build_with_claude in execute mode."""
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
         prompt = "Test prompt"
         
-        mock_result = Mock(returncode=0, stdout="Executed", stderr="")
+        # Mock CommandResult with proper structure
+        mock_result = CommandResult(
+            returncode=0,
+            stdout="Executed",
+            stderr="",
+            command=["claude"],
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
+        )
         
-        with patch('subprocess.run', return_value=mock_result):
-            result = prompt_builder.build_with_claude(prompt, ExecutionOptions(execute_mode=True))
+        prompt_builder.executor.execute.return_value = mock_result
+        result = prompt_builder.build_with_claude(prompt, execute_mode=True)
         
         assert result is not None
         assert result.success is True
@@ -136,15 +186,27 @@ class TestPromptBuilderExtended:
     
     def test_build_with_claude_review_mode(self, prompt_builder):
         """Test build_with_claude in review mode."""
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
         prompt = "Test prompt"
         
         with patch('tempfile.NamedTemporaryFile') as mock_temp:
             mock_temp.return_value.__enter__.return_value.name = '/tmp/test.txt'
             
-            mock_result = Mock(returncode=0, stdout="Review output", stderr="")
+            # Mock CommandResult with proper structure
+            mock_result = CommandResult(
+                returncode=0,
+                stdout="Review output",
+                stderr="",
+                command=["claude"],
+                execution_time=1.0,
+                error_type=CommandErrorType.SUCCESS,
+                attempts=1,
+                success=True
+            )
             
-            with patch('subprocess.run', return_value=mock_result):
-                result = prompt_builder.build_with_claude(prompt, ExecutionOptions(review_mode=True))
+            prompt_builder.executor.execute.return_value = mock_result
+            result = prompt_builder.build_with_claude(prompt, review_mode=True)
         
         assert result is not None
         assert result.success is True
@@ -154,8 +216,10 @@ class TestPromptBuilderExtended:
         """Test build_with_claude with timeout."""
         prompt = "Test prompt"
         
-        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('cmd', 30)):
-            result = prompt_builder.build_with_claude(prompt)
+        # Mock CommandExecutor to raise TimeoutExpired
+        prompt_builder.executor.execute.side_effect = subprocess.TimeoutExpired('cmd', 30)
+        
+        result = prompt_builder.build_with_claude(prompt)
         
         assert result is not None
         assert result.success is False

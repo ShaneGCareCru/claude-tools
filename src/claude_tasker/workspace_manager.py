@@ -1,12 +1,14 @@
 """Workspace and Git management module for claude-tasker."""
 
-import subprocess
 import os
 import time
 from typing import Tuple, Optional, List
 from pathlib import Path
 from src.claude_tasker.logging_config import get_logger
 from src.claude_tasker.branch_manager import BranchManager, BranchStrategy
+from src.claude_tasker.services.git_service import GitService
+from src.claude_tasker.services.gh_service import GhService
+from src.claude_tasker.services.command_executor import CommandExecutor, CommandResult
 
 logger = get_logger(__name__)
 
@@ -14,15 +16,37 @@ logger = get_logger(__name__)
 class WorkspaceManager:
     """Manages workspace hygiene, Git operations, and branch management."""
     
-    def __init__(self, cwd: str = ".", branch_strategy: str = "reuse"):
+    def __init__(self, cwd: str = ".", branch_strategy: str = "reuse", 
+                 command_executor: Optional[CommandExecutor] = None,
+                 git_service: Optional[GitService] = None,
+                 gh_service: Optional[GhService] = None):
         """Initialize workspace manager.
         
         Args:
             cwd: Current working directory
             branch_strategy: Branch strategy - "always_new", "reuse", or "reuse_or_fail"
+            command_executor: Optional CommandExecutor instance (for testing)
+            git_service: Optional GitService instance (for testing)  
+            gh_service: Optional GhService instance (for testing)
         """
         self.cwd = Path(cwd).resolve()
         self.interactive_mode = self._is_interactive()
+        
+        # Initialize services for branch manager (allow injection for testing)
+        if command_executor is None:
+            self.command_executor = CommandExecutor()
+        else:
+            self.command_executor = command_executor
+            
+        if git_service is None:
+            self.git_service = GitService(self.command_executor)
+        else:
+            self.git_service = git_service
+            
+        if gh_service is None:
+            self.gh_service = GhService(self.command_executor)
+        else:
+            self.gh_service = gh_service
         
         # Initialize branch manager with specified strategy
         strategy_map = {
@@ -31,7 +55,7 @@ class WorkspaceManager:
             "reuse_or_fail": BranchStrategy.REUSE_OR_FAIL
         }
         strategy = strategy_map.get(branch_strategy, BranchStrategy.REUSE_WHEN_POSSIBLE)
-        self.branch_manager = BranchManager(strategy)
+        self.branch_manager = BranchManager(self.git_service, self.gh_service, strategy)
     
     def _is_interactive(self) -> bool:
         """Determine if running in interactive mode."""
@@ -41,24 +65,20 @@ class WorkspaceManager:
             os.environ.get('GITHUB_ACTIONS') != 'true'  # not in GitHub Actions
         )
     
-    def _run_git_command(self, cmd: List[str], **kwargs) -> subprocess.CompletedProcess:
-        """Execute git command with proper error handling."""
-        try:
-            return subprocess.run(
-                ['git'] + cmd,
-                cwd=self.cwd,
-                capture_output=True,
-                text=True,
-                check=False,
-                **kwargs
-            )
-        except Exception as e:
-            return subprocess.CompletedProcess(
-                args=['git'] + cmd,
-                returncode=1,
-                stdout="",
-                stderr=str(e)
-            )
+    def _run_git_command(self, cmd: List[str], **kwargs):
+        """Execute git command using GitService."""
+        # Use GitService's underlying executor which returns CommandResult
+        result = self.git_service.executor.execute(['git'] + cmd, cwd=str(self.cwd))
+        
+        # Create a subprocess.CompletedProcess-compatible object
+        class CompatibleResult:
+            def __init__(self, command_result):
+                self.args = ['git'] + cmd
+                self.returncode = 0 if command_result.success else command_result.returncode
+                self.stdout = command_result.stdout
+                self.stderr = command_result.stderr
+        
+        return CompatibleResult(result)
     
     def detect_main_branch(self) -> str:
         """Detect the main branch (main, master, or default)."""

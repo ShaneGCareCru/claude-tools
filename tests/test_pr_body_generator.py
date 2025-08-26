@@ -9,6 +9,7 @@ import pytest
 
 from src.claude_tasker.pr_body_generator import PRBodyGenerator
 from src.claude_tasker.github_client import IssueData
+from src.claude_tasker.services.command_executor import CommandExecutor
 
 
 class TestPRBodyGenerator(TestCase):
@@ -16,7 +17,8 @@ class TestPRBodyGenerator(TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.generator = PRBodyGenerator()
+        mock_executor = Mock(spec=CommandExecutor)
+        self.generator = PRBodyGenerator(mock_executor)
         self.sample_issue = IssueData(
             number=123,
             title="Add user authentication",
@@ -337,11 +339,23 @@ index 1234567..abcdefg 100644
         self.assertLess(len(result), self.generator.max_size)
         self.assertIn("Content truncated", result)
     
-    @patch('subprocess.run')
     @patch('pathlib.Path.unlink')
-    def test_generate_with_llm_success(self, mock_unlink, mock_run):
+    def test_generate_with_llm_success(self, mock_unlink):
         """Test LLM-based generation success."""
-        mock_run.return_value = Mock(returncode=0, stdout="Generated PR body")
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
+        # Mock the CommandExecutor to return successful result
+        mock_result = CommandResult(
+            returncode=0,
+            stdout="Generated PR body",
+            stderr="",
+            command=["llm"],
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
+        )
+        self.generator.executor.execute.return_value = mock_result
         
         context = {
             'issue': {'number': 123, 'title': 'Test', 'body': 'Test', 'labels': []},
@@ -356,7 +370,7 @@ index 1234567..abcdefg 100644
             result = self.generator.generate_with_llm(context)
             
             self.assertEqual(result, "Generated PR body")
-            mock_run.assert_called_once()
+            self.generator.executor.execute.assert_called_once()
             mock_unlink.assert_called_once()
     
     @patch('subprocess.run')
@@ -393,11 +407,23 @@ index 1234567..abcdefg 100644
         
         self.assertIsNone(result)
     
-    @patch('subprocess.run')
     @patch('pathlib.Path.unlink')
-    def test_generate_with_claude_success(self, mock_unlink, mock_run):
+    def test_generate_with_claude_success(self, mock_unlink):
         """Test Claude-based generation success."""
-        mock_run.return_value = Mock(returncode=0, stdout="Generated PR body")
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
+        
+        # Mock the CommandExecutor to return successful result
+        mock_result = CommandResult(
+            returncode=0,
+            stdout="Generated PR body",
+            stderr="",
+            command=["claude"],
+            execution_time=1.0,
+            error_type=CommandErrorType.SUCCESS,
+            attempts=1,
+            success=True
+        )
+        self.generator.executor.execute.return_value = mock_result
         
         context = {
             'issue': {'number': 123, 'title': 'Test', 'body': 'Test', 'labels': []},
@@ -412,9 +438,9 @@ index 1234567..abcdefg 100644
             result = self.generator.generate_with_claude(context)
             
             self.assertEqual(result, "Generated PR body")
-            mock_run.assert_called_once()
+            self.generator.executor.execute.assert_called_once()
             # Check that claude CLI was called with correct arguments
-            call_args = mock_run.call_args[0][0]
+            call_args = self.generator.executor.execute.call_args[0][0]
             self.assertIn('claude', call_args)
             self.assertIn('--file', call_args)
     
