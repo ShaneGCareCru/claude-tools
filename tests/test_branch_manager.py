@@ -18,12 +18,24 @@ class TestBranchManager(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
+        self.mock_git_service = Mock(spec=GitService)
+        self.mock_gh_service = Mock(spec=GhService)
+        # Mock the remote URL for initialization
+        self.mock_git_service.remote.return_value = Mock(success=True, stdout="https://github.com/owner/repo.git")
+        self.branch_manager = BranchManager(
+            strategy=BranchStrategy.REUSE_WHEN_POSSIBLE,
+            git_service=self.mock_git_service,
+            gh_service=self.mock_gh_service
+        )
+    
+    def _create_branch_manager(self, strategy=BranchStrategy.REUSE_WHEN_POSSIBLE):
+        """Helper to create BranchManager with mocked services."""
         mock_git_service = Mock(spec=GitService)
         mock_gh_service = Mock(spec=GhService)
         # Mock the remote URL for initialization
         mock_git_service.remote.return_value = Mock(success=True, stdout="https://github.com/owner/repo.git")
-        self.branch_manager = BranchManager(
-            strategy=BranchStrategy.REUSE_WHEN_POSSIBLE,
+        return BranchManager(
+            strategy=strategy,
             git_service=mock_git_service,
             gh_service=mock_gh_service
         )
@@ -199,7 +211,7 @@ class TestBranchManager(unittest.TestCase):
     
     def test_branch_strategy_always_new(self):
         """Test ALWAYS_NEW strategy skips reuse logic."""
-        manager = BranchManager(BranchStrategy.ALWAYS_NEW)
+        manager = self._create_branch_manager(BranchStrategy.ALWAYS_NEW)
         
         with patch.object(manager, '_create_new_branch') as mock_create:
             mock_create.return_value = (True, "issue-123-new", "created")
@@ -212,7 +224,7 @@ class TestBranchManager(unittest.TestCase):
     
     def test_branch_strategy_reuse_or_fail(self):
         """Test REUSE_OR_FAIL strategy fails when no branch exists."""
-        manager = BranchManager(BranchStrategy.REUSE_OR_FAIL)
+        manager = self._create_branch_manager(BranchStrategy.REUSE_OR_FAIL)
         
         with patch.object(manager, 'find_existing_pr_for_issue') as mock_find_pr:
             with patch.object(manager, 'find_existing_branches_for_issue') as mock_find_branches:
@@ -232,7 +244,7 @@ class TestBranchManager(unittest.TestCase):
             stdout="https://github.com/owner/repo.git"
         )
         
-        manager = BranchManager()
+        manager = self._create_branch_manager()
         
         self.assertEqual(manager.repo_owner, "owner")
         self.assertEqual(manager.repo_name, "repo")

@@ -26,6 +26,11 @@ class WorkspaceManager:
         self.cwd = Path(cwd).resolve()
         self.interactive_mode = self._is_interactive()
         
+        # Initialize services for branch manager
+        self.command_executor = CommandExecutor()
+        self.git_service = GitService(self.command_executor)
+        self.gh_service = GhService(self.command_executor)
+        
         # Initialize branch manager with specified strategy
         strategy_map = {
             "always_new": BranchStrategy.ALWAYS_NEW,
@@ -33,7 +38,7 @@ class WorkspaceManager:
             "reuse_or_fail": BranchStrategy.REUSE_OR_FAIL
         }
         strategy = strategy_map.get(branch_strategy, BranchStrategy.REUSE_WHEN_POSSIBLE)
-        self.branch_manager = BranchManager(strategy)
+        self.branch_manager = BranchManager(strategy, self.git_service, self.gh_service)
     
     def _is_interactive(self) -> bool:
         """Determine if running in interactive mode."""

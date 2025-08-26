@@ -17,13 +17,17 @@ from claude_tasker.workspace_manager import WorkspaceManager
 from claude_tasker.prompt_builder import PromptBuilder
 from claude_tasker.pr_body_generator import PRBodyGenerator
 from claude_tasker.workflow_logic import WorkflowLogic
+from claude_tasker.services.command_executor import CommandExecutor
+from claude_tasker.services.git_service import GitService
 
 
 def test_environment_validation():
     """Test environment validation functionality."""
     print("🧪 Testing environment validation...")
     
-    validator = EnvironmentValidator()
+    command_executor = CommandExecutor()
+    git_service = GitService(command_executor)
+    validator = EnvironmentValidator(git_service)
     
     # Test basic functionality
     results = validator.validate_all_dependencies(prompt_only=True)
@@ -83,7 +87,8 @@ def test_prompt_builder():
     """Test prompt builder functionality."""
     print("🧪 Testing prompt builder...")
     
-    builder = PromptBuilder()
+    command_executor = CommandExecutor()
+    builder = PromptBuilder(command_executor)
     
     # Test Lyra-Dev framework loading
     assert "DECONSTRUCT" in builder.lyra_dev_framework
@@ -105,7 +110,8 @@ def test_pr_body_generator():
     """Test PR body generator functionality."""
     print("🧪 Testing PR body generator...")
     
-    generator = PRBodyGenerator()
+    command_executor = CommandExecutor()
+    generator = PRBodyGenerator(command_executor)
     
     # Test template detection
     with tempfile.TemporaryDirectory() as temp_dir:
