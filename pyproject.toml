@@ -25,15 +25,14 @@ classifiers = [
 ]
 
 dependencies = [
-    "pydantic==2.10.2",
-    "pydantic-core==2.27.1",
-    "PyGithub>=2.5.0",
-    "click>=8.0.0",
-    "rich>=13.0.0",
-    "python-dotenv>=1.0.0",
+    "pydantic>=2.11.7",
+    "PyGithub>=2.7.0",
+    "click>=8.1.7",
+    "rich>=13.9.4",
+    "python-dotenv>=1.0.1",
     "python-json-logger>=2.0.7",
-    "colorlog>=6.7.0",
-    "typing-extensions>=4.0.0",
+    "colorlog>=6.8.2",
+    "typing-extensions>=4.12.2",
 ]
 
 [project.optional-dependencies]
