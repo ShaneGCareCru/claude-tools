@@ -199,8 +199,10 @@ class TestRealExecutionIntegration:
         This test would have caught that execution mode wasn't working.
         """
         from src.claude_tasker.prompt_builder import PromptBuilder
+        from unittest.mock import Mock
         
-        prompt_builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        prompt_builder = PromptBuilder(mock_executor)
         
         test_prompt = "Create a file called 'test.txt' with content 'Hello World'"
         
@@ -327,8 +329,10 @@ class TestExecutionModeValidation:
         This would have caught the missing execute_mode=True bug directly.
         """
         from src.claude_tasker.prompt_builder import PromptBuilder
+        from unittest.mock import Mock
         
-        prompt_builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        prompt_builder = PromptBuilder(mock_executor)
         
         # Mock all external dependencies to prevent real LLM calls
         with patch.object(prompt_builder, 'build_with_claude') as mock_build, \
