@@ -55,7 +55,7 @@ class WorkspaceManager:
             "reuse_or_fail": BranchStrategy.REUSE_OR_FAIL
         }
         strategy = strategy_map.get(branch_strategy, BranchStrategy.REUSE_WHEN_POSSIBLE)
-        self.branch_manager = BranchManager(strategy, self.git_service, self.gh_service)
+        self.branch_manager = BranchManager(self.git_service, self.gh_service, strategy)
     
     def _is_interactive(self) -> bool:
         """Determine if running in interactive mode."""

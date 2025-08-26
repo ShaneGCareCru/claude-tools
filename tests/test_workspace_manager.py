@@ -19,6 +19,7 @@ class TestWorkspaceManager:
         """Helper to create WorkspaceManager with mocked services."""
         mock_executor = Mock(spec=CommandExecutor)
         mock_git_service = Mock(spec=GitService)
+        mock_git_service.executor = mock_executor  # Add executor attribute
         mock_gh_service = Mock(spec=GhService)
         return WorkspaceManager(
             cwd=cwd,
@@ -424,7 +425,7 @@ class TestWorkspaceManager:
     
     def test_initialization_with_custom_params(self):
         """Test WorkspaceManager initialization with custom parameters."""
-        workspace = WorkspaceManager(cwd="/custom/path", branch_strategy="always_new")
+        workspace = self._create_workspace_manager(cwd="/custom/path", branch_strategy="always_new")
         
         assert str(workspace.cwd) == "/custom/path"
         # branch_strategy is passed to BranchManager, not stored as attribute
