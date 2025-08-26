@@ -9,6 +9,8 @@ import time
 from src.claude_tasker.branch_manager import (
     BranchManager, BranchStrategy, BranchInfo
 )
+from src.claude_tasker.services.git_service import GitService
+from src.claude_tasker.services.gh_service import GhService
 
 
 class TestBranchManager(unittest.TestCase):
@@ -16,7 +18,15 @@ class TestBranchManager(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.branch_manager = BranchManager(BranchStrategy.REUSE_WHEN_POSSIBLE)
+        mock_git_service = Mock(spec=GitService)
+        mock_gh_service = Mock(spec=GhService)
+        # Mock the remote URL for initialization
+        mock_git_service.remote.return_value = Mock(success=True, stdout="https://github.com/owner/repo.git")
+        self.branch_manager = BranchManager(
+            strategy=BranchStrategy.REUSE_WHEN_POSSIBLE,
+            git_service=mock_git_service,
+            gh_service=mock_gh_service
+        )
     
     @patch('subprocess.run')
     def test_find_existing_branches_for_issue(self, mock_run):
