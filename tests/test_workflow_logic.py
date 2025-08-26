@@ -14,6 +14,18 @@ from src.claude_tasker.prompt_models import TwoStageResult, LLMResult
 class TestWorkflowLogic:
     """Test complex workflow logic and agent coordination."""
     
+    @pytest.fixture
+    def workflow_logic(self):
+        """Create a WorkflowLogic instance with mocked dependencies."""
+        with patch('src.claude_tasker.workflow_logic.CommandExecutor'), \
+             patch('src.claude_tasker.workflow_logic.GitService'), \
+             patch('src.claude_tasker.workflow_logic.EnvironmentValidator'), \
+             patch('src.claude_tasker.workflow_logic.PromptBuilder'), \
+             patch('src.claude_tasker.workflow_logic.PRBodyGenerator'), \
+             patch('src.claude_tasker.workflow_logic.GitHubClient'), \
+             patch('src.claude_tasker.workflow_logic.WorkspaceManager'):
+            return WorkflowLogic()
+    
     def test_two_stage_execution_meta_prompt(self):
         """Test two-stage execution: meta-prompt generation."""
         workflow = WorkflowLogic()
