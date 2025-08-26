@@ -11,6 +11,7 @@ from src.claude_tasker.prompt_builder import PromptBuilder
 from src.claude_tasker.github_client import GitHubClient, IssueData
 from src.claude_tasker.workspace_manager import WorkspaceManager
 from src.claude_tasker.prompt_models import TwoStageResult
+from src.claude_tasker.services.command_executor import CommandExecutor
 
 
 class TestCLICoverageImprovements:
@@ -148,11 +149,24 @@ class TestPromptBuilderCoverageImprovements:
     
     def test_execute_llm_tool_timeout(self):
         """Test _execute_llm_tool with timeout."""
-        builder = PromptBuilder()
+        from src.claude_tasker.services.command_executor import CommandResult, CommandErrorType
         
-        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('cmd', 30)):
-            with patch('tempfile.NamedTemporaryFile'):
-                result = builder._execute_llm_tool('llm', 'test prompt')
+        mock_executor = Mock(spec=CommandExecutor)
+        # Mock timeout result from CommandExecutor
+        timeout_result = CommandResult(
+            returncode=124,
+            stdout="",
+            stderr="Command timed out after 30s",
+            command="llm prompt /tmp/test",
+            execution_time=30.0,
+            error_type=CommandErrorType.TIMEOUT,
+            attempts=1,
+            success=False
+        )
+        mock_executor.execute.return_value = timeout_result
+        
+        builder = PromptBuilder(mock_executor)
+        result = builder._execute_llm_tool('llm', 'test prompt')
         
         assert result is not None
         assert result.success is False
@@ -160,7 +174,8 @@ class TestPromptBuilderCoverageImprovements:
     
     def test_execute_llm_tool_generic_exception(self):
         """Test _execute_llm_tool with generic exception."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         with patch('subprocess.run', side_effect=Exception("Unexpected error")):
             with patch('tempfile.NamedTemporaryFile'):
@@ -172,7 +187,8 @@ class TestPromptBuilderCoverageImprovements:
     
     def test_build_with_claude_cleanup_on_error(self):
         """Test build_with_claude cleanup on error."""
-        builder = PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        builder = PromptBuilder(mock_executor)
         
         mock_file = Mock()
         mock_file.name = '/tmp/test.txt'

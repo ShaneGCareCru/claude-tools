@@ -13,6 +13,8 @@ from .prompt_builder import PromptBuilder
 from .prompt_models import PromptContext, ExecutionOptions
 from .pr_body_generator import PRBodyGenerator
 from src.claude_tasker.logging_config import get_logger
+from .services.command_executor import CommandExecutor
+from .services.git_service import GitService
 
 logger = get_logger(__name__)
 
@@ -42,12 +44,16 @@ class WorkflowLogic:
         self.coder = coder
         self.branch_strategy = branch_strategy
         
-        # Initialize components
-        self.env_validator = EnvironmentValidator()
+        # Initialize services
+        self.command_executor = CommandExecutor()
+        self.git_service = GitService(self.command_executor)
+        
+        # Initialize components with dependency injection
+        self.env_validator = EnvironmentValidator(self.git_service)
         self.github_client = GitHubClient()
         self.workspace_manager = WorkspaceManager(branch_strategy=branch_strategy)
-        self.prompt_builder = PromptBuilder()
-        self.pr_body_generator = PRBodyGenerator()
+        self.prompt_builder = PromptBuilder(self.command_executor)
+        self.pr_body_generator = PRBodyGenerator(self.command_executor)
         
         # Detect the default branch if not specified
         if base_branch is None:

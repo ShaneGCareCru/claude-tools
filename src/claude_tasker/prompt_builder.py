@@ -1171,6 +1171,18 @@ Provide only the complete GitHub feature request content following this template
                             tool=tool_name
                         )
             else:
+                # Check if it's a timeout specifically
+                if result.error_type.value == "timeout":
+                    logger.error("Command timed out")
+                    return LLMResult(
+                        success=False,
+                        error='Command timed out',
+                        stderr=result.stderr,
+                        stdout=result.stdout,
+                        tool=tool_name,
+                        status_code=result.returncode
+                    )
+                
                 logger.error(f"Command failed with return code {result.returncode}")
                 # Log full error details in debug mode
                 if logger.isEnabledFor(logging.DEBUG):
@@ -1189,14 +1201,7 @@ Provide only the complete GitHub feature request content following this template
                     status_code=result.returncode
                 )
                 
-        except subprocess.TimeoutExpired:
-            logger.error("Command timed out")
-            return LLMResult(
-                success=False,
-                error='Command timed out',
-                tool=tool_name
-            )
-        except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
+        except Exception as e:
             logger.error(f"Error: {e}")
             return LLMResult(
                 success=False,

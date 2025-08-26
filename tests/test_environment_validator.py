@@ -8,6 +8,8 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 
 from src.claude_tasker.environment_validator import EnvironmentValidator
+from src.claude_tasker.services.command_executor import CommandExecutor
+from src.claude_tasker.services.git_service import GitService
 
 
 class TestEnvironmentValidator(TestCase):
@@ -15,7 +17,9 @@ class TestEnvironmentValidator(TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.validator = EnvironmentValidator()
+        mock_executor = Mock(spec=CommandExecutor)
+        mock_git_service = Mock(spec=GitService)
+        self.validator = EnvironmentValidator(mock_git_service)
     
     def test_init(self):
         """Test validator initialization."""

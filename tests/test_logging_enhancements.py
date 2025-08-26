@@ -17,6 +17,7 @@ from src.claude_tasker.prompt_models import TwoStageResult, LLMResult
 from src.claude_tasker.workflow_logic import WorkflowLogic
 from src.claude_tasker.prompt_models import LLMResult
 from src.claude_tasker.github_client import IssueData, PRData
+from src.claude_tasker.services.command_executor import CommandExecutor
 
 
 class TestLoggingConfiguration:
@@ -93,7 +94,8 @@ class TestPromptBuilderLogging:
     @pytest.fixture
     def prompt_builder(self):
         """Create a PromptBuilder instance for testing."""
-        return PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        return PromptBuilder(mock_executor)
     
     @pytest.fixture
     def mock_issue_data(self):
@@ -230,7 +232,12 @@ class TestWorkflowLogicLogging:
         """Create a WorkflowLogic instance for testing."""
         with patch('src.claude_tasker.workflow_logic.GitHubClient'):
             with patch('src.claude_tasker.workflow_logic.WorkspaceManager'):
-                return WorkflowLogic()
+                with patch('src.claude_tasker.workflow_logic.EnvironmentValidator'):
+                    with patch('src.claude_tasker.workflow_logic.PromptBuilder'):
+                        with patch('src.claude_tasker.workflow_logic.PRBodyGenerator'):
+                            with patch('src.claude_tasker.workflow_logic.CommandExecutor'):
+                                with patch('src.claude_tasker.workflow_logic.GitService'):
+                                    return WorkflowLogic()
     
     def test_validate_environment_logging(self, workflow_logic, caplog):
         """Test environment validation logging."""
@@ -317,7 +324,8 @@ class TestResponseProcessingLogging:
     @pytest.fixture
     def prompt_builder(self):
         """Create a PromptBuilder instance for testing."""
-        return PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        return PromptBuilder(mock_executor)
     
     @patch('subprocess.run')
     def test_successful_response_logging(self, mock_run, prompt_builder, caplog):

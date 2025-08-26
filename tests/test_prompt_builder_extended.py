@@ -9,6 +9,7 @@ from pathlib import Path
 from src.claude_tasker.prompt_builder import PromptBuilder
 from src.claude_tasker.github_client import IssueData, PRData
 from src.claude_tasker.prompt_models import ExecutionOptions, PromptContext, LLMResult, TwoStageResult
+from src.claude_tasker.services.command_executor import CommandExecutor
 
 
 class TestPromptBuilderExtended:
@@ -17,7 +18,8 @@ class TestPromptBuilderExtended:
     @pytest.fixture
     def prompt_builder(self):
         """Create a PromptBuilder instance."""
-        return PromptBuilder()
+        mock_executor = Mock(spec=CommandExecutor)
+        return PromptBuilder(mock_executor)
     
     def test_generate_bug_analysis_prompt(self, prompt_builder):
         """Test generate_bug_analysis_prompt."""
