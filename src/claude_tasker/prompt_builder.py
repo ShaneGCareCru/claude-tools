@@ -1,6 +1,7 @@
 """Prompt building module implementing two-stage execution and Lyra-Dev framework."""
 
 import json
+import subprocess
 import tempfile
 from typing import Dict, Optional, Any
 from pathlib import Path
