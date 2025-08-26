@@ -61,7 +61,7 @@ class TestWorkspaceManager:
             git_service=mock_git_service,
             gh_service=Mock()
         )
-            assert workspace.interactive_mode is False
+        assert workspace.interactive_mode is False
     
     def test_is_interactive_github_actions(self):
         """Test interactive mode detection in GitHub Actions."""
@@ -74,7 +74,7 @@ class TestWorkspaceManager:
             git_service=mock_git_service,
             gh_service=Mock()
         )
-            assert workspace.interactive_mode is False
+        assert workspace.interactive_mode is False
     
     def test_run_git_command_success(self):
         """Test successful git command execution."""
