@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "timestamp": "2025-08-27 04:51:23.491930+00:00",
+  "op_id": "test_op_123",
+  "context": {
+    "type": "issue",
+    "issue_number": 123,
+    "pr_number": null,
+    "branch": null,
+    "repository": null,
+    "description": null
+  },
+  "actions": [
+    {
+      "type": "comment_issue",
+      "dedupe_strategy": {
+        "method": "by_content_signature",
+        "marker": null,
+        "signature_lines": 3
+      },
+      "issue_number": 123,
+      "comment": "Test comment"
+    }
+  ]
+}

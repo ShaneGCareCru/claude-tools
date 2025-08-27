@@ -329,11 +329,12 @@ class TestPlan:
             Plan(context=context, actions=[action], op_id="invalid@chars!")
     
     def test_empty_actions_validation(self):
-        """Test that plans require at least one action."""
+        """Test that plans can have empty actions."""
         context = Context(type=ContextType.MANUAL)
         
-        with pytest.raises(ValidationError, match="at least 1 item"):
-            Plan(context=context, actions=[])
+        # Empty actions should be allowed now
+        plan = Plan(context=context, actions=[])
+        assert plan.actions == []
     
     def test_json_serialization(self):
         """Test JSON serialization and deserialization."""

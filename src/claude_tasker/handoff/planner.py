@@ -179,13 +179,6 @@ class Planner:
                     method=DedupeMethod.BY_TITLE_HASH
                 )
             ))
-        else:
-            # If not creating issue, add a comment action as placeholder
-            actions.append(CommentIssueAction(
-                issue_number=1,  # Dummy issue number
-                comment=f"Bug analysis completed: {bug_description[:100]}...",
-                dedupe_strategy=DedupeStrategy(method=DedupeMethod.NONE)
-            ))
         
         return Plan(
             context=context,

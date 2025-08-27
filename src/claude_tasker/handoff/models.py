@@ -127,7 +127,7 @@ class Plan(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     op_id: str = Field(default_factory=lambda: f"op_{uuid.uuid4().hex[:16]}")
     context: Context
-    actions: List[Union[CreateIssueAction, CreatePRAction, CommentIssueAction, CommentPRAction]] = Field(..., min_length=1)
+    actions: List[Union[CreateIssueAction, CreatePRAction, CommentIssueAction, CommentPRAction]] = Field(default_factory=list)
 
     @field_validator('op_id')
     def validate_op_id(cls, v):
