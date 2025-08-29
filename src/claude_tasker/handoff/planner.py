@@ -43,7 +43,11 @@ class Planner:
         """
         # Fetch issue data if not provided
         if not issue_data and self.gh_service:
-            issue_data = self.gh_service.get_issue(issue_number)
+            try:
+                issue_data = self.gh_service.get_issue(issue_number)
+            except Exception as e:
+                logger.error(f"GitHub API error while fetching issue #{issue_number}: {e}")
+                return None
             
         if not issue_data:
             logger.error(f"Cannot fetch issue #{issue_number}")
@@ -114,7 +118,11 @@ class Planner:
         """
         # Fetch PR data if not provided
         if not pr_data and self.gh_service:
-            pr_data = self.gh_service.get_pr(pr_number)
+            try:
+                pr_data = self.gh_service.get_pr(pr_number)
+            except Exception as e:
+                logger.error(f"GitHub API error while fetching PR #{pr_number}: {e}")
+                return None
             
         if not pr_data:
             logger.error(f"Cannot fetch PR #{pr_number}")

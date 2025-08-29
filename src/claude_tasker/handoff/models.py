@@ -65,10 +65,10 @@ class Context(BaseModel):
 
 class Action(BaseModel):
     """Base action class."""
+    model_config = {"use_enum_values": True}
+    
     type: ActionType
     dedupe_strategy: DedupeStrategy
-
-    model_config = {"use_enum_values": True}
 
 
 class CreateIssueAction(Action):
@@ -141,9 +141,17 @@ class Plan(BaseModel):
         return self.model_dump(by_alias=True, mode='json')
 
     def to_json(self) -> str:
-        """Convert to JSON string."""
+        """Convert to JSON string with safe serialization."""
         import json
-        return json.dumps(self.model_dump(by_alias=True), indent=2, default=str)
+        from datetime import datetime
+        
+        def safe_serializer(obj):
+            """Safe JSON serializer for datetime objects."""
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+        
+        return json.dumps(self.model_dump(by_alias=True), indent=2, default=safe_serializer)
 
     @classmethod
     def from_json(cls, json_str: str) -> 'Plan':

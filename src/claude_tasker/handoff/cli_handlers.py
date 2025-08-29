@@ -22,12 +22,22 @@ logger = logging.getLogger(__name__)
 class HandoffCLI:
     """CLI handlers for handoff operations."""
     
-    def __init__(self):
-        """Initialize handoff CLI handlers."""
-        # Initialize services
-        self.command_executor = CommandExecutor()
-        self.git_service = GitService(self.command_executor)
-        self.gh_service = GhService(self.command_executor)
+    def __init__(self, 
+                 command_executor: Optional[CommandExecutor] = None,
+                 git_service: Optional[GitService] = None,
+                 gh_service: Optional[GhService] = None):
+        """
+        Initialize handoff CLI handlers with dependency injection support.
+        
+        Args:
+            command_executor: Command executor service (created if None)
+            git_service: Git service (created if None)
+            gh_service: GitHub service (created if None)
+        """
+        # Initialize services with DI support
+        self.command_executor = command_executor or CommandExecutor()
+        self.git_service = git_service or GitService(self.command_executor)
+        self.gh_service = gh_service or GhService(self.command_executor)
         
         # Initialize handoff components
         self.planner = Planner(self.gh_service)
@@ -101,10 +111,27 @@ class HandoffCLI:
                 filename = f"{timestamp}.{plan.op_id}.json"
                 output_path = handoff_dir / filename
             
-            # Write plan to file
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(plan.to_json())
+            # Write plan to file with path validation
+            try:
+                # Resolve path to prevent traversal attacks
+                resolved_path = output_path.resolve()
+                working_dir = Path.cwd().resolve()
+                
+                # Ensure the resolved path is within the working directory
+                if not str(resolved_path).startswith(str(working_dir)):
+                    raise ValueError(f"Path traversal attempt blocked: {output_path}")
+                
+                resolved_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(resolved_path, 'w', encoding='utf-8') as f:
+                    f.write(plan.to_json())
+                    
+                # Update output_path for display
+                output_path = resolved_path
+                
+            except OSError as e:
+                logger.error(f"Failed to write plan file: {e}")
+                print(f"Error: Failed to write plan file: {e}", file=sys.stderr)
+                return 1
             
             print(f"✅ Plan generated: {output_path}")
             

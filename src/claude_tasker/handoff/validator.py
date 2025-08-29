@@ -136,7 +136,7 @@ class Validator:
     
     def validate_plan_file(self, file_path: Path) -> ValidationResult:
         """
-        Validate plan from file.
+        Validate plan from file with optimized single file load.
         
         Args:
             file_path: Path to plan JSON file
@@ -151,7 +151,7 @@ class Validator:
             result.add_error(f"Plan file not found: {file_path}")
             return result
         
-        # Load and parse JSON
+        # Load and parse JSON once
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 plan_dict = json.load(f)
@@ -165,22 +165,23 @@ class Validator:
         result.warnings.extend(schema_result.warnings)
         
         if not schema_result.valid:
+            result.valid = False
             return result
         
-        # Parse plan object
+        # Parse plan object from already loaded dict
         try:
             plan = Plan.from_dict(plan_dict)
         except Exception as e:
             result.add_error(f"Failed to parse plan: {e}")
             return result
         
-        # Semantic validation
+        # Semantic validation using the parsed plan object
         semantic_result = self.validate_semantic(plan)
         result.errors.extend(semantic_result.errors)
         result.warnings.extend(semantic_result.warnings)
         
-        if not result.valid:
-            result.valid = semantic_result.valid
+        if not semantic_result.valid:
+            result.valid = False
         
         return result
     
