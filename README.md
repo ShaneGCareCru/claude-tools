@@ -36,7 +36,7 @@ sudo mv claude-tasker-* /usr/local/bin/claude-tasker
 claude-tasker --version
 ```
 
-**That's it!** See [INSTALLATION.md](./INSTALLATION.md) for detailed instructions and troubleshooting.
+**That's it!** See [INSTALLATION.md](./docs/development/INSTALLATION.md) for detailed instructions and troubleshooting.
 
 ### Development Installation
 
