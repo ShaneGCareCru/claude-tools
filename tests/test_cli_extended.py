@@ -117,33 +117,33 @@ class TestValidateArguments:
     
     def test_validate_no_action(self):
         """Test validation when no action specified."""
-        args = Mock(issue=None, bug=None, review_pr=None, feature=None, timeout=10)
+        args = Mock(issue=None, bug=None, review_pr=None, feature=None, timeout=10, plan=False, validate=None)
         result = validate_arguments(args)
         assert result == "Must specify an issue number, --review-pr, --bug, or --feature"
     
     def test_validate_multiple_actions(self):
         """Test validation when multiple actions specified."""
-        args = Mock(issue='42', bug='bug desc', review_pr=None, feature=None, timeout=10)
+        args = Mock(issue='42', bug='bug desc', review_pr=None, feature=None, timeout=10, plan=False, validate=None)
         result = validate_arguments(args)
         assert result == "Error: Cannot specify multiple actions simultaneously"
     
     def test_validate_invalid_issue_format(self):
         """Test validation with invalid issue format."""
-        args = Mock(issue='invalid', bug=None, review_pr=None, feature=None, timeout=10)
+        args = Mock(issue='invalid', bug=None, review_pr=None, feature=None, timeout=10, plan=False, validate=None)
         with patch('src.claude_tasker.cli.parse_issue_range', return_value=(None, None)):
             result = validate_arguments(args)
             assert "Invalid issue number format" in result
     
     def test_validate_invalid_pr_format(self):
         """Test validation with invalid PR format."""
-        args = Mock(issue=None, bug=None, review_pr='invalid', feature=None, timeout=10)
+        args = Mock(issue=None, bug=None, review_pr='invalid', feature=None, timeout=10, plan=False, validate=None)
         with patch('src.claude_tasker.cli.parse_pr_range', return_value=(None, None)):
             result = validate_arguments(args)
             assert "Invalid PR number format" in result
     
     def test_validate_negative_timeout(self):
         """Test validation with negative timeout."""
-        args = Mock(issue='42', bug=None, review_pr=None, feature=None, timeout=-1)
+        args = Mock(issue='42', bug=None, review_pr=None, feature=None, timeout=-1, plan=False, validate=None)
         result = validate_arguments(args)
         assert "Invalid timeout value" in result
     
@@ -152,7 +152,7 @@ class TestValidateArguments:
         args = Mock(
             issue='42', bug=None, review_pr=None, feature=None, timeout=10,
             project=None, base_branch=None, auto_pr_review=False, 
-            prompt_only=False
+            prompt_only=False, plan=False, validate=None
         )
         with patch('src.claude_tasker.cli.parse_issue_range', return_value=(42, 42)):
             result = validate_arguments(args)
@@ -247,7 +247,7 @@ class TestMainFunction:
     @patch('src.claude_tasker.cli.WorkflowLogic')
     def test_main_no_action_specified(self, mock_workflow, mock_parser):
         """Test main with no action specified."""
-        mock_args = Mock(issue=None, bug=None, review_pr=None)
+        mock_args = Mock(issue=None, bug=None, review_pr=None, feature=None, plan=False, validate=None)
         mock_parser_instance = Mock()
         mock_parser_instance.parse_args.return_value = mock_args
         mock_parser.return_value = mock_parser_instance
@@ -266,7 +266,7 @@ class TestMainFunction:
         mock_args = Mock(
             issue='42', bug=None, review_pr=None, coder='claude', timeout=10,
             project=None, base_branch=None, auto_pr_review=False, prompt_only=False,
-            interactive=False, dry_run=False
+            interactive=False, dry_run=False, feature=None, plan=False, validate=None
         )
         mock_parser_instance = Mock()
         mock_parser_instance.parse_args.return_value = mock_args
@@ -290,7 +290,7 @@ class TestMainFunction:
         mock_args = Mock(
             issue='42', bug=None, review_pr=None, coder='claude', timeout=10,
             project=None, base_branch=None, auto_pr_review=False, prompt_only=False,
-            interactive=False, dry_run=False
+            interactive=False, dry_run=False, feature=None, plan=False, validate=None
         )
         mock_parser_instance = Mock()
         mock_parser_instance.parse_args.return_value = mock_args
@@ -317,9 +317,10 @@ class TestMainFunction:
     def test_main_process_issue_success(self, mock_workflow_class, mock_path, mock_parser):
         """Test successful issue processing."""
         mock_args = Mock(
-            issue='42', bug=None, review_pr=None, coder='claude',
+            issue='42', bug=None, review_pr=None, coder='claude', feature=None,
             interactive=False, prompt_only=False, dry_run=False, timeout=10,
-            project=None, base_branch=None, auto_pr_review=False
+            project=None, base_branch=None, auto_pr_review=False,
+            plan=False, validate=None
         )
         mock_parser_instance = Mock()
         mock_parser_instance.parse_args.return_value = mock_args
@@ -346,9 +347,10 @@ class TestMainFunction:
     def test_main_process_issue_range(self, mock_workflow_class, mock_path, mock_parser):
         """Test processing issue range."""
         mock_args = Mock(
-            issue='10-12', bug=None, review_pr=None, coder='claude',
+            issue='10-12', bug=None, review_pr=None, coder='claude', feature=None,
             interactive=False, prompt_only=False, dry_run=False, timeout=10,
-            project=None, base_branch=None, auto_pr_review=False
+            project=None, base_branch=None, auto_pr_review=False,
+            plan=False, validate=None
         )
         mock_parser_instance = Mock()
         mock_parser_instance.parse_args.return_value = mock_args
@@ -379,9 +381,9 @@ class TestMainFunction:
     def test_main_keyboard_interrupt(self, mock_workflow_class, mock_path, mock_parser):
         """Test handling keyboard interrupt."""
         mock_args = Mock(
-            issue='42', bug=None, review_pr=None, coder='claude', timeout=10,
+            issue='42', bug=None, review_pr=None, coder='claude', feature=None, timeout=10,
             project=None, base_branch=None, auto_pr_review=False, prompt_only=False,
-            interactive=False, dry_run=False
+            interactive=False, dry_run=False, plan=False, validate=None
         )
         mock_parser_instance = Mock()
         mock_parser_instance.parse_args.return_value = mock_args

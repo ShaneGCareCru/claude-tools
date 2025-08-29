@@ -254,28 +254,28 @@ class TestValidateArguments(TestCase):
     
     def test_validate_no_action(self):
         """Test validation with no action specified."""
-        args = Mock(issue=None, review_pr=None, bug=None, feature=None)
+        args = Mock(issue=None, review_pr=None, bug=None, feature=None, plan=False, validate=None)
         error = validate_arguments(args)
         self.assertIsNotNone(error)
         self.assertIn("Must specify", error)
     
     def test_validate_multiple_actions(self):
         """Test validation with multiple actions."""
-        args = Mock(issue='123', review_pr='456', bug=None, feature=None)
+        args = Mock(issue='123', review_pr='456', bug=None, feature=None, plan=False, validate=None)
         error = validate_arguments(args)
         self.assertIsNotNone(error)
         self.assertIn("multiple actions", error)
     
     def test_validate_invalid_issue_format(self):
         """Test validation with invalid issue format."""
-        args = Mock(issue='abc', review_pr=None, bug=None, feature=None)
+        args = Mock(issue='abc', review_pr=None, bug=None, feature=None, plan=False, validate=None)
         error = validate_arguments(args)
         self.assertIsNotNone(error)
         self.assertIn("Invalid issue number format", error)
     
     def test_validate_invalid_pr_format(self):
         """Test validation with invalid PR format."""
-        args = Mock(issue=None, review_pr='xyz', bug=None, feature=None)
+        args = Mock(issue=None, review_pr='xyz', bug=None, feature=None, plan=False, validate=None)
         error = validate_arguments(args)
         self.assertIsNotNone(error)
         self.assertIn("Invalid PR number format", error)
@@ -285,7 +285,8 @@ class TestValidateArguments(TestCase):
         args = Mock(
             issue='123', review_pr=None, bug=None, feature=None,
             timeout=-5, project=None, base_branch=None,
-            auto_pr_review=False, prompt_only=False, interactive=False
+            auto_pr_review=False, prompt_only=False, interactive=False,
+            plan=False, validate=None
         )
         error = validate_arguments(args)
         self.assertIsNotNone(error)
@@ -296,7 +297,8 @@ class TestValidateArguments(TestCase):
         args = Mock(
             issue='123', review_pr=None, bug=None, feature=None,
             timeout=10, project=-1, base_branch=None,
-            auto_pr_review=False, prompt_only=False, interactive=False
+            auto_pr_review=False, prompt_only=False, interactive=False,
+            plan=False, validate=None
         )
         error = validate_arguments(args)
         self.assertIsNotNone(error)
@@ -307,7 +309,8 @@ class TestValidateArguments(TestCase):
         args = Mock(
             issue=None, review_pr=None, bug='  ', feature=None,
             timeout=10, project=None, base_branch=None,
-            auto_pr_review=False, prompt_only=False, interactive=False
+            auto_pr_review=False, prompt_only=False, interactive=False,
+            plan=False, validate=None
         )
         error = validate_arguments(args)
         self.assertIsNotNone(error)
@@ -318,7 +321,8 @@ class TestValidateArguments(TestCase):
         args = Mock(
             issue=None, review_pr=None, bug=None, feature='',
             timeout=10, project=None, base_branch=None,
-            auto_pr_review=False, prompt_only=False, interactive=False
+            auto_pr_review=False, prompt_only=False, interactive=False,
+            plan=False, validate=None
         )
         error = validate_arguments(args)
         self.assertIsNotNone(error)
@@ -329,7 +333,8 @@ class TestValidateArguments(TestCase):
         args = Mock(
             issue='123', review_pr=None, bug=None, feature=None,
             timeout=10, project=None, base_branch='  ',
-            auto_pr_review=False, prompt_only=False, interactive=False
+            auto_pr_review=False, prompt_only=False, interactive=False,
+            plan=False, validate=None
         )
         error = validate_arguments(args)
         self.assertIsNotNone(error)
@@ -340,7 +345,8 @@ class TestValidateArguments(TestCase):
         args = Mock(
             issue='123', review_pr=None, bug=None, feature=None,
             timeout=10, project=None, base_branch=None,
-            auto_pr_review=True, prompt_only=True, interactive=False
+            auto_pr_review=True, prompt_only=True, interactive=False,
+            plan=False, validate=None
         )
         error = validate_arguments(args)
         self.assertIsNotNone(error)
@@ -351,7 +357,8 @@ class TestValidateArguments(TestCase):
         args = Mock(
             issue=None, review_pr='123', bug=None, feature=None,
             timeout=10, project=None, base_branch=None,
-            auto_pr_review=True, prompt_only=False, interactive=False
+            auto_pr_review=True, prompt_only=False, interactive=False,
+            plan=False, validate=None
         )
         error = validate_arguments(args)
         self.assertIsNotNone(error)
@@ -362,7 +369,8 @@ class TestValidateArguments(TestCase):
         args = Mock(
             issue='123', review_pr=None, bug=None, feature=None,
             timeout=10, project=None, base_branch=None,
-            auto_pr_review=False, prompt_only=True, interactive=True
+            auto_pr_review=False, prompt_only=True, interactive=True,
+            plan=False, validate=None
         )
         error = validate_arguments(args)
         self.assertIsNotNone(error)
@@ -373,7 +381,8 @@ class TestValidateArguments(TestCase):
         args = Mock(
             issue='123', review_pr=None, bug=None, feature=None,
             timeout=10, project=5, base_branch='main',
-            auto_pr_review=False, prompt_only=False, interactive=False
+            auto_pr_review=False, prompt_only=False, interactive=False,
+            plan=False, validate=None
         )
         error = validate_arguments(args)
         self.assertIsNone(error)

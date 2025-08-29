@@ -9,6 +9,7 @@ from typing import List, Optional
 from pathlib import Path
 
 from .workflow_logic import WorkflowLogic, WorkflowResult
+from .handoff.cli_handlers import HandoffCLI, create_default_handoff_dir
 from src.claude_tasker.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -71,6 +72,9 @@ Examples:
   claude-tasker --review-pr 456           # Review PR #456
   claude-tasker --bug "Test failure"      # Analyze bug and create issue
   claude-tasker --feature "Add CSV export" # Analyze feature and create issue
+  claude-tasker --plan 123                # Generate plan for issue #123
+  claude-tasker --plan --bug "Test failure" # Generate plan for bug analysis
+  claude-tasker --validate plan.json      # Validate handoff plan file
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -101,6 +105,19 @@ Examples:
         '--feature',
         metavar='DESCRIPTION',
         help='Analyze feature request and create issue'
+    )
+    
+    # Handoff planning and validation commands
+    parser.add_argument(
+        '--plan',
+        action='store_true',
+        help='Generate handoff plan instead of executing (use with issue/PR/bug/feature)'
+    )
+    
+    parser.add_argument(
+        '--validate',
+        metavar='PLAN_FILE',
+        help='Validate handoff plan file'
     )
     
     # Execution options
@@ -187,7 +204,15 @@ Examples:
 
 def validate_arguments(args: argparse.Namespace) -> Optional[str]:
     """Validate argument combinations."""
-    # Must specify exactly one main action
+    # Handle validation command separately
+    if args.validate:
+        # Validation is standalone - no other actions allowed
+        actions = [args.issue, args.review_pr, args.bug, args.feature, args.plan]
+        if any(action for action in actions):
+            return "Error: --validate cannot be used with other actions"
+        return None
+    
+    # Must specify exactly one main action (unless using --validate)
     actions = [args.issue, args.review_pr, args.bug, args.feature]
     active_actions = [action for action in actions if action is not None]
     
@@ -305,6 +330,36 @@ def main() -> int:
     )
     
     try:
+        # Handle validation command first (standalone)
+        if args.validate:
+            handoff_cli = HandoffCLI()
+            return handoff_cli.handle_validate_command(args.validate)
+        
+        # Handle plan generation mode
+        if args.plan:
+            handoff_cli = HandoffCLI()
+            create_default_handoff_dir()
+            
+            if args.issue:
+                start, end = parse_issue_range(args.issue)
+                if start != end:
+                    print("Error: Plan generation only supports single issues, not ranges", file=sys.stderr)
+                    return 1
+                return handoff_cli.handle_plan_command(issue_number=start)
+            
+            elif args.review_pr:
+                start, end = parse_pr_range(args.review_pr)
+                if start != end:
+                    print("Error: Plan generation only supports single PRs, not ranges", file=sys.stderr)
+                    return 1
+                return handoff_cli.handle_plan_command(pr_number=start)
+            
+            elif args.bug:
+                return handoff_cli.handle_plan_command(bug_description=args.bug)
+            
+            elif args.feature:
+                return handoff_cli.handle_plan_command(feature_description=args.feature)
+        
         results = []
         
         if args.issue:
